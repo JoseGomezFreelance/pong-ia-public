@@ -1,7 +1,7 @@
 # pong-ia
 
-[![Tests](https://github.com/JoseGomezFreelance/pong-ia/actions/workflows/tests.yml/badge.svg)](https://github.com/JoseGomezFreelance/pong-ia/actions/workflows/tests.yml)
-[![Type check](https://github.com/JoseGomezFreelance/pong-ia/actions/workflows/type-check.yml/badge.svg)](https://github.com/JoseGomezFreelance/pong-ia/actions/workflows/type-check.yml)
+[![Tests](https://github.com/JoseGomezFreelance/pong-ia-public/actions/workflows/tests.yml/badge.svg)](https://github.com/JoseGomezFreelance/pong-ia-public/actions/workflows/tests.yml)
+[![Type check](https://github.com/JoseGomezFreelance/pong-ia-public/actions/workflows/type-check.yml/badge.svg)](https://github.com/JoseGomezFreelance/pong-ia-public/actions/workflows/type-check.yml)
 
 The classic Pong but with AI, what could go wrong?
 

@@ -135,7 +135,7 @@ El ejecutable funciona sin modelo, pero para habilitar narración IA:
 Este repo adopta como opción recomendada `Qwen2.5-3B-Instruct` en formato GGUF por su mejor calidad narrativa en local.
 
 Detalle y comparación de modelos:
-- Ver `docs/local_model_options.md`.
+- Ver [`docs/local_model_options.md`](docs/local_model_options.md).
 
 ### Bootstrap automático del modelo
 ```bash

@@ -1,0 +1,38 @@
+"""
+Pong IA -- Compatibilidad con versiones anteriores.
+
+El juego se ha reorganizado en el paquete pong/.
+Usa 'python main.py' para ejecutar el juego.
+
+Este archivo existe para que 'python pong.py' siga funcionando.
+"""
+
+import argparse
+import logging
+import multiprocessing
+import sys
+
+from pong.game import Game
+
+
+def setup_logging(*, debug: bool) -> None:
+    """Configura el logging raiz del proceso."""
+    logging.basicConfig(
+        level=logging.DEBUG if debug else logging.WARNING,
+        format="%(levelname)s [%(name)s] %(message)s",
+        stream=sys.stderr,
+    )
+
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    parser = argparse.ArgumentParser(description="Pong IA")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Activa logging detallado (DEBUG)",
+    )
+    args = parser.parse_args()
+    setup_logging(debug=args.debug)
+    game = Game()
+    game.run()

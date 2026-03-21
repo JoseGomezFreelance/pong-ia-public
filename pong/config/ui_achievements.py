@@ -1,0 +1,147 @@
+"""Sistema de logros: popup, sonido, galeria, estadisticas y botones."""
+
+__all__ = [
+    # Notificacion visual
+    "ACHIEVEMENT_POPUP_DURATION",
+    "ACHIEVEMENT_POPUP_FADE_DURATION",
+    "ACHIEVEMENT_POPUP_HEIGHT",
+    "ACHIEVEMENT_POPUP_MARGIN",
+    "ACHIEVEMENT_POPUP_SLIDE_DURATION",
+    "ACHIEVEMENT_POPUP_FONT_NAME",
+    "ACHIEVEMENT_POPUP_FONT_FLAVOR",
+    "ACHIEVEMENT_POPUP_BORDER_WIDTH",
+    "ACHIEVEMENT_POPUP_WIDTH",
+    # Sonido del logro (chirp ascendente)
+    "ACHIEVEMENT_SOUND_FREQ_START",
+    "ACHIEVEMENT_SOUND_FREQ_END",
+    "ACHIEVEMENT_SOUND_DURATION",
+    "ACHIEVEMENT_SOUND_VOLUME",
+    # Boton "Estadisticas y logros" en pantalla final
+    "END_SCREEN_LOGROS_BUTTON_WIDTH",
+    "END_SCREEN_LOGROS_BUTTON_HEIGHT",
+    "END_SCREEN_LOGROS_BUTTON_TEXT",
+    # Seccion de estadisticas (pantalla de logros)
+    "STATS_SECTION_LABEL_COLOR",
+    "STATS_SECTION_VALUE_COLOR",
+    "STATS_SECTION_RECORD_COLOR",
+    "STATS_SECTION_MOOD_COLOR",
+    "STATS_SECTION_ROW_HEIGHT",
+    "STATS_SECTION_HEADER_GAP",
+    # Boton "Depuracion" en pantalla final
+    "END_SCREEN_DEBUG_BUTTON_WIDTH",
+    "END_SCREEN_DEBUG_BUTTON_HEIGHT",
+    "END_SCREEN_DEBUG_BUTTON_TEXT",
+    "END_SCREEN_DEBUG_BUTTON_MARGIN_BOTTOM",
+    # Pantalla de galeria de logros (estilo Cookie Clicker)
+    "ACHIEVEMENTS_SCREEN_MARGIN_X",
+    "ACHIEVEMENTS_SCREEN_MARGIN_TOP",
+    "ACHIEVEMENTS_SCREEN_HEADER_HEIGHT",
+    "ACHIEVEMENTS_SCREEN_CATEGORY_HEADER_HEIGHT",
+    "ACHIEVEMENTS_SCREEN_CATEGORY_GAP",
+    # Tiles de logro
+    "ACHIEVEMENT_TILE_WIDTH",
+    "ACHIEVEMENT_TILE_HEIGHT",
+    "ACHIEVEMENT_TILE_GAP_X",
+    "ACHIEVEMENT_TILE_GAP_Y",
+    "ACHIEVEMENT_TILE_BORDER_WIDTH",
+    "ACHIEVEMENT_TILE_PADDING",
+    # Boton "Volver"
+    "ACHIEVEMENTS_BACK_BUTTON_WIDTH",
+    "ACHIEVEMENTS_BACK_BUTTON_HEIGHT",
+    "ACHIEVEMENTS_BACK_BUTTON_MARGIN_TOP",
+    "ACHIEVEMENTS_BACK_BUTTON_TEXT",
+    # Colores de la galeria de logros
+    "COLOR_ACHIEVEMENT_UNLOCKED_BG",
+    "COLOR_ACHIEVEMENT_UNLOCKED_BORDER",
+    "COLOR_ACHIEVEMENT_UNLOCKED_NAME",
+    "COLOR_ACHIEVEMENT_UNLOCKED_DESC",
+    "COLOR_ACHIEVEMENT_UNLOCKED_FLAVOR",
+    "COLOR_ACHIEVEMENT_LOCKED_BG",
+    "COLOR_ACHIEVEMENT_LOCKED_BORDER",
+    "COLOR_ACHIEVEMENT_LOCKED_TEXT",
+    "COLOR_ACHIEVEMENT_LOCKED_MYSTERY",
+    "COLOR_ACHIEVEMENT_CATEGORY_HEADER",
+    "COLOR_ACHIEVEMENT_PROGRESS_TEXT",
+    "COLOR_ACHIEVEMENT_PROGRESS_BAR",
+    "COLOR_ACHIEVEMENT_PROGRESS_BAR_BG",
+]
+
+
+# ============================================================
+# SISTEMA DE LOGROS
+# ============================================================
+# Configuracion visual y sonora de las notificaciones de logros
+# inspiradas en el estilo de Cookie Clicker, adaptadas a la estetica
+# ZX Spectrum del juego.
+
+# --- Notificacion visual ---
+ACHIEVEMENT_POPUP_DURATION = 3.5        # Segundos que se muestra el popup
+ACHIEVEMENT_POPUP_FADE_DURATION = 0.5   # Segundos de fade out al final
+ACHIEVEMENT_POPUP_HEIGHT = 60           # Altura del popup (pixeles)
+ACHIEVEMENT_POPUP_MARGIN = 10           # Margen desde el borde inferior de la ventana
+ACHIEVEMENT_POPUP_SLIDE_DURATION = 0.4  # Segundos de animacion slide-up al aparecer
+ACHIEVEMENT_POPUP_FONT_NAME = 24        # Tamano de fuente para el nombre del logro
+ACHIEVEMENT_POPUP_FONT_FLAVOR = 18      # Tamano de fuente para el flavor text
+ACHIEVEMENT_POPUP_BORDER_WIDTH = 2      # Grosor del borde estilo ZX Spectrum
+ACHIEVEMENT_POPUP_WIDTH = 500           # Ancho del popup (pixeles)
+
+# --- Sonido del logro (chirp ascendente) ---
+ACHIEVEMENT_SOUND_FREQ_START = 880      # Frecuencia inicio del chirp (Hz)
+ACHIEVEMENT_SOUND_FREQ_END = 1320       # Frecuencia fin del chirp (Hz)
+ACHIEVEMENT_SOUND_DURATION = 0.18       # Duracion total del chirp (segundos)
+ACHIEVEMENT_SOUND_VOLUME = 0.30         # Volumen (0.0 a 1.0)
+
+# --- Boton "Estadisticas y logros" en pantalla final ---
+END_SCREEN_LOGROS_BUTTON_WIDTH = 220
+END_SCREEN_LOGROS_BUTTON_HEIGHT = 34
+END_SCREEN_LOGROS_BUTTON_TEXT = "Estadísticas y logros"
+
+# --- Seccion de estadisticas (pantalla de logros) ---
+STATS_SECTION_LABEL_COLOR = (170, 170, 170)     # Gris claro para labels
+STATS_SECTION_VALUE_COLOR = (255, 255, 85)       # Amarillo para valores
+STATS_SECTION_RECORD_COLOR = (85, 255, 85)       # Verde para records
+STATS_SECTION_MOOD_COLOR = (85, 255, 255)        # Cyan para moods
+STATS_SECTION_ROW_HEIGHT = 22                    # Alto de cada fila de stat
+STATS_SECTION_HEADER_GAP = 8                     # Gap tras cabecera de seccion
+
+# --- Boton "Depuracion" en pantalla final ---
+END_SCREEN_DEBUG_BUTTON_WIDTH = 150
+END_SCREEN_DEBUG_BUTTON_HEIGHT = 34
+END_SCREEN_DEBUG_BUTTON_TEXT = "Depuración"
+END_SCREEN_DEBUG_BUTTON_MARGIN_BOTTOM = 15
+
+# --- Pantalla de galeria de logros (estilo Cookie Clicker) ---
+ACHIEVEMENTS_SCREEN_MARGIN_X = 20
+ACHIEVEMENTS_SCREEN_MARGIN_TOP = 20
+ACHIEVEMENTS_SCREEN_HEADER_HEIGHT = 70
+ACHIEVEMENTS_SCREEN_CATEGORY_HEADER_HEIGHT = 28
+ACHIEVEMENTS_SCREEN_CATEGORY_GAP = 12
+
+# Tiles de logro (grid de 2 columnas)
+ACHIEVEMENT_TILE_WIDTH = 370              # (800 - 20*2 - 20 gap) / 2
+ACHIEVEMENT_TILE_HEIGHT = 56
+ACHIEVEMENT_TILE_GAP_X = 20
+ACHIEVEMENT_TILE_GAP_Y = 6
+ACHIEVEMENT_TILE_BORDER_WIDTH = 1
+ACHIEVEMENT_TILE_PADDING = 8
+
+# Boton "Volver"
+ACHIEVEMENTS_BACK_BUTTON_WIDTH = 110
+ACHIEVEMENTS_BACK_BUTTON_HEIGHT = 34
+ACHIEVEMENTS_BACK_BUTTON_MARGIN_TOP = 16
+ACHIEVEMENTS_BACK_BUTTON_TEXT = "Volver"
+
+# Colores de la galeria de logros
+COLOR_ACHIEVEMENT_UNLOCKED_BG = (15, 30, 15)
+COLOR_ACHIEVEMENT_UNLOCKED_BORDER = (85, 255, 85)
+COLOR_ACHIEVEMENT_UNLOCKED_NAME = (255, 255, 85)
+COLOR_ACHIEVEMENT_UNLOCKED_DESC = (170, 170, 170)
+COLOR_ACHIEVEMENT_UNLOCKED_FLAVOR = (85, 255, 255)
+COLOR_ACHIEVEMENT_LOCKED_BG = (20, 8, 8)
+COLOR_ACHIEVEMENT_LOCKED_BORDER = (85, 85, 85)
+COLOR_ACHIEVEMENT_LOCKED_TEXT = (85, 85, 85)
+COLOR_ACHIEVEMENT_LOCKED_MYSTERY = (170, 0, 0)
+COLOR_ACHIEVEMENT_CATEGORY_HEADER = (85, 255, 255)
+COLOR_ACHIEVEMENT_PROGRESS_TEXT = (255, 255, 85)
+COLOR_ACHIEVEMENT_PROGRESS_BAR = (85, 255, 85)
+COLOR_ACHIEVEMENT_PROGRESS_BAR_BG = (30, 30, 30)

@@ -1,0 +1,103 @@
+# =============================================================================
+# models.toml -- Configuracion de modelos de IA para Pong-IA
+# =============================================================================
+#
+# Copia este archivo como "models.toml" y edita los valores que necesites.
+# Si models.toml no existe, el juego usa los defaults (Qwen 2.5 3B + Juggernaut Reborn).
+#
+# models.toml esta en .gitignore — cada usuario tiene su propia configuracion.
+
+# -----------------------------------------------------------------------------
+# [llm] -- Modelo de lenguaje local (archivo GGUF via llama-cpp-python)
+# -----------------------------------------------------------------------------
+[llm]
+# Nombre del archivo .gguf dentro de la carpeta models/
+# Tambien acepta ruta absoluta (ej: "/ruta/completa/al/modelo.gguf")
+filename = "qwen2.5-3b-instruct-q4_k_m.gguf"
+
+# URL de descarga directa del modelo GGUF (usada por el instalador in-game)
+# download_url = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf?download=true"
+
+# Ventana de contexto en tokens (mas grande = mas memoria, mas coherencia)
+context_window = 4096
+
+# Hilos de CPU para inferencia (ajusta segun tu procesador)
+threads = 4
+
+# Nombre para mostrar en la UI (opcional, si no se pone usa el filename)
+# display_name = "Qwen2.5-3B-Instruct Q4_K_M"
+
+# --- Ejemplos de otros modelos ---
+#
+# Llama 3.2 3B:
+#   filename = "llama-3.2-3b-instruct-q4_k_m.gguf"
+#   context_window = 8192
+#
+# Mistral 7B (necesita mas RAM):
+#   filename = "mistral-7b-instruct-v0.3-q4_k_m.gguf"
+#   context_window = 8192
+#   threads = 6
+#
+# Qwen 2.5 1.5B (mas ligero, mas rapido):
+#   filename = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+#   context_window = 4096
+
+
+# -----------------------------------------------------------------------------
+# [image] -- Pipeline de generacion de imagenes (Stable Diffusion via diffusers)
+# -----------------------------------------------------------------------------
+[image]
+# Tipo de pipeline: "sd15" (Stable Diffusion 1.5) o "sdxl" (SDXL)
+# SDXL requiere mas VRAM (~8 GB) pero produce imagenes de mayor calidad.
+pipeline = "sd15"
+
+# ID del modelo base en HuggingFace
+model_id = "stablediffusionapi/juggernaut-reborn"
+
+# Parametros de generacion
+steps = 4              # Mas pasos = mas calidad, mas lento
+guidance_scale = 1.5   # CFG scale (para LCM suele ser 1.0-2.0)
+width = 512            # Resolucion de la imagen generada
+height = 512
+
+# --- LoRAs ---
+# Lista ordenada de LoRAs. Se aplican en secuencia.
+# Cada LoRA tiene: id, source ("huggingface", "civitai", "local"), weight (opcional)
+
+[[image.loras]]
+id = "latent-consistency/lcm-lora-sdv1-5"
+source = "huggingface"
+# weight = 1.0
+
+# Ejemplo: LoRA local descargado de CivitAI
+# [[image.loras]]
+# id = "/ruta/al/archivo.safetensors"
+# source = "local"
+# weight = 0.8
+
+# --- Scheduler ---
+# Tipo de scheduler: "lcm", "euler", "euler_a", "dpm", "default"
+# "lcm" es el mas rapido (4 pasos), los demas necesitan 20-30 pasos.
+[image.scheduler]
+type = "lcm"
+
+# --- Ejemplos de otros modelos de imagen ---
+#
+# CyberRealistic (SD 1.5, fotorrealista):
+#   model_id = "cyberdelia/CyberRealistic"
+#   steps = 25
+#   guidance_scale = 7.0
+#   [image.scheduler]
+#   type = "euler_a"
+#   [[image.loras]]
+#   # Sin LCM LoRA para modelos no-LCM
+#
+# SDXL (requiere GPU potente):
+#   pipeline = "sdxl"
+#   model_id = "stabilityai/stable-diffusion-xl-base-1.0"
+#   steps = 25
+#   guidance_scale = 7.0
+#   width = 1024
+#   height = 1024
+#   [image.scheduler]
+#   type = "euler"

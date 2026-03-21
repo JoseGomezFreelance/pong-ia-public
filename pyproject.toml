@@ -1,0 +1,85 @@
+[project]
+name = "pong-ia"
+version = "0.07"
+requires-python = ">=3.10"
+dependencies = [
+    "tomli>=2.0.0; python_version < '3.11'",
+]
+
+[project.entry-points."pong_ia.llm"]
+local = "pong.providers:LocalLLMProvider"
+
+[project.entry-points."pong_ia.imagegen"]
+local = "pong.image_generator:ImageGenerator"
+
+[tool.mypy]
+python_version = "3.10"
+files = ["pong", "tests"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "llama_cpp",
+    "llama_cpp.*",
+    "mido",
+    "mido.*",
+    "diffusers",
+    "diffusers.*",
+    "huggingface_hub",
+    "huggingface_hub.*",
+    "torch",
+    "torch.*",
+    "transformers",
+    "transformers.*",
+    "accelerate",
+    "accelerate.*",
+    "safetensors",
+    "safetensors.*",
+    "peft",
+    "peft.*",
+    "tomli",
+    "tomli.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pong.image_generator"
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = "pong.providers"
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*", "*Tests"]
+python_functions = ["test_*"]
+addopts = "--tb=short -q"
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+
+[tool.coverage.run]
+source = ["pong"]
+omit = [
+    "pong/splash.py",
+    "pong/renderer_achievements.py",
+    "pong/renderer_end_screen.py",
+    "pong/renderer.py",
+    "pong/achievement_icons.py",
+    "pong/image_generator.py",
+    "pong/game_imagegen.py",
+    "pong/narrator.py",
+    "pong/narration_bridge.py",
+    "pong/music.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__",
+]

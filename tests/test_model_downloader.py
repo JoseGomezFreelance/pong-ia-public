@@ -13,9 +13,14 @@ from pong.model_downloader import (
     _is_diffusion_installed,
     _is_llm_installed,
     _resolve_models_dir,
+    _split_base,
     check_models_status,
+    delete_llm_model,
     download_diffusion_models,
+    download_llm_for_tier,
     download_llm_model,
+    find_unused_llm_models,
+    is_llm_tier_installed,
     run_downloads,
 )
 
@@ -176,13 +181,22 @@ class TestResolveModelsDir(unittest.TestCase):
 class TestDownloadLLMModel(unittest.TestCase):
     """Tests para download_llm_model."""
 
+    _FAKE_LLM_CONFIG = MagicMock(
+        filename="test-model.gguf",
+        download_url="https://example.com/test-model.gguf",
+    )
+
+    @patch("pong.config.models.load_models_config")
     @patch("pong.model_downloader._resolve_models_dir")
     @patch("pong.model_downloader.urllib.request.urlopen")
     def test_successful_download(
         self, mock_urlopen: MagicMock, mock_dir: MagicMock,
+        mock_config: MagicMock,
     ) -> None:
         import tempfile
         import os
+
+        mock_config.return_value = (self._FAKE_LLM_CONFIG, MagicMock())
 
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_dir.return_value = Path(tmpdir)
@@ -205,12 +219,16 @@ class TestDownloadLLMModel(unittest.TestCase):
             self.assertEqual(status.progress, 1.0)
             self.assertEqual(status.status_text, "Instalado")
 
+    @patch("pong.config.models.load_models_config")
     @patch("pong.model_downloader._resolve_models_dir")
     @patch("pong.model_downloader.urllib.request.urlopen")
     def test_download_without_content_length(
         self, mock_urlopen: MagicMock, mock_dir: MagicMock,
+        mock_config: MagicMock,
     ) -> None:
         import tempfile
+
+        mock_config.return_value = (self._FAKE_LLM_CONFIG, MagicMock())
 
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_dir.return_value = Path(tmpdir)
@@ -230,6 +248,7 @@ class TestDownloadLLMModel(unittest.TestCase):
             self.assertTrue(result)
             self.assertTrue(status.installed)
 
+    @patch("pong.config.models.load_models_config")
     @patch("pong.model_downloader._resolve_models_dir")
     @patch(
         "pong.model_downloader.urllib.request.urlopen",
@@ -237,8 +256,11 @@ class TestDownloadLLMModel(unittest.TestCase):
     )
     def test_network_error(
         self, _mock_urlopen: MagicMock, mock_dir: MagicMock,
+        mock_config: MagicMock,
     ) -> None:
         import tempfile
+
+        mock_config.return_value = (self._FAKE_LLM_CONFIG, MagicMock())
 
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_dir.return_value = Path(tmpdir)
@@ -357,3 +379,218 @@ class TestRunDownloads(unittest.TestCase):
 
         mock_llm.assert_not_called()
         mock_diff.assert_called_once()
+
+
+# ============================================================
+# _split_base
+# ============================================================
+
+
+class TestSplitBase(unittest.TestCase):
+    """Tests para _split_base."""
+
+    def test_single_file(self) -> None:
+        self.assertEqual(
+            _split_base("qwen2.5-3b-instruct-q4_k_m.gguf"),
+            "qwen2.5-3b-instruct-q4_k_m",
+        )
+
+    def test_split_part(self) -> None:
+        self.assertEqual(
+            _split_base("qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"),
+            "qwen2.5-7b-instruct-q4_k_m",
+        )
+
+    def test_split_last_part(self) -> None:
+        self.assertEqual(
+            _split_base("qwen2.5-14b-instruct-q4_k_m-00003-of-00003.gguf"),
+            "qwen2.5-14b-instruct-q4_k_m",
+        )
+
+
+# ============================================================
+# find_unused_llm_models
+# ============================================================
+
+
+class TestFindUnusedLLMModels(unittest.TestCase):
+    """Tests para find_unused_llm_models."""
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_finds_unused_single_file(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            # Active model
+            active = Path(tmpdir) / "qwen2.5-3b-instruct-q4_k_m.gguf"
+            active.write_bytes(b"x" * 200_000_000)
+            # Unused model
+            unused = Path(tmpdir) / "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+            unused.write_bytes(b"x" * 200_000_000)
+
+            result = find_unused_llm_models("qwen2.5-3b-instruct-q4_k_m.gguf")
+            self.assertEqual(len(result), 1)
+            self.assertIn("qwen2.5-7b", result[0][0])
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_no_unused(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            active = Path(tmpdir) / "qwen2.5-3b-instruct-q4_k_m.gguf"
+            active.write_bytes(b"x" * 200_000_000)
+
+            result = find_unused_llm_models("qwen2.5-3b-instruct-q4_k_m.gguf")
+            self.assertEqual(result, [])
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_groups_split_files(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            # Active single file
+            active = Path(tmpdir) / "qwen2.5-3b-instruct-q4_k_m.gguf"
+            active.write_bytes(b"x" * 200_000_000)
+            # Unused split model (2 parts)
+            p1 = Path(tmpdir) / "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+            p2 = Path(tmpdir) / "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"
+            p1.write_bytes(b"x" * 200_000_000)
+            p2.write_bytes(b"x" * 200_000_000)
+
+            result = find_unused_llm_models("qwen2.5-3b-instruct-q4_k_m.gguf")
+            self.assertEqual(len(result), 1)
+            # Total size should be ~0.4 GB
+            self.assertGreater(result[0][1], 0.3)
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_empty_dir(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            result = find_unused_llm_models("anything.gguf")
+            self.assertEqual(result, [])
+
+
+# ============================================================
+# delete_llm_model
+# ============================================================
+
+
+class TestDeleteLLMModel(unittest.TestCase):
+    """Tests para delete_llm_model."""
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_deletes_single_file(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            f = Path(tmpdir) / "qwen2.5-3b-instruct-q4_k_m.gguf"
+            f.write_bytes(b"x" * 100)
+
+            result = delete_llm_model("qwen2.5-3b-instruct-q4_k_m.gguf")
+            self.assertTrue(result)
+            self.assertFalse(f.exists())
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_deletes_split_group(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            p1 = Path(tmpdir) / "model-00001-of-00002.gguf"
+            p2 = Path(tmpdir) / "model-00002-of-00002.gguf"
+            p1.write_bytes(b"x" * 100)
+            p2.write_bytes(b"x" * 100)
+
+            result = delete_llm_model("model-00001-of-00002.gguf")
+            self.assertTrue(result)
+            self.assertFalse(p1.exists())
+            self.assertFalse(p2.exists())
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    def test_nonexistent_returns_false(self, mock_dir: MagicMock) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+            result = delete_llm_model("nonexistent.gguf")
+            self.assertFalse(result)
+
+
+# ============================================================
+# is_llm_tier_installed
+# ============================================================
+
+
+class TestIsLLMTierInstalled(unittest.TestCase):
+    """Tests para is_llm_tier_installed."""
+
+    @patch("pong.model_downloader._is_llm_installed", return_value=True)
+    def test_installed(self, _mock: MagicMock) -> None:
+        self.assertTrue(is_llm_tier_installed("model.gguf"))
+
+    @patch("pong.model_downloader._is_llm_installed", return_value=False)
+    def test_not_installed(self, _mock: MagicMock) -> None:
+        self.assertFalse(is_llm_tier_installed("model.gguf"))
+
+
+# ============================================================
+# download_llm_for_tier
+# ============================================================
+
+
+class TestDownloadLLMForTier(unittest.TestCase):
+    """Tests para download_llm_for_tier."""
+
+    @patch("pong.model_downloader._resolve_models_dir")
+    @patch("pong.model_downloader.urllib.request.urlopen")
+    def test_single_file_download(
+        self, mock_urlopen: MagicMock, mock_dir: MagicMock,
+    ) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dir.return_value = Path(tmpdir)
+
+            data = b"x" * 512
+            mock_response = MagicMock()
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_response.headers = {"Content-Length": str(len(data))}
+            mock_response.read = MagicMock(side_effect=[data, b""])
+            mock_urlopen.return_value = mock_response
+
+            status = ModelStatus(name="Test", model_type="llm")
+            lock = threading.Lock()
+            result = download_llm_for_tier(
+                repo_id="Qwen/test",
+                gguf_pattern="test*.gguf",
+                filename="test.gguf",
+                download_url="https://example.com/test.gguf",
+                split=False,
+                status=status,
+                lock=lock,
+            )
+            self.assertTrue(result)
+            self.assertTrue(status.installed)
+
+    @patch("pong.model_downloader._download_hf_split", return_value=True)
+    def test_split_delegates_to_hf(self, mock_hf: MagicMock) -> None:
+        status = ModelStatus(name="Test", model_type="llm")
+        lock = threading.Lock()
+        result = download_llm_for_tier(
+            repo_id="Qwen/test",
+            gguf_pattern="test*.gguf",
+            filename="test-00001-of-00002.gguf",
+            download_url="",
+            split=True,
+            status=status,
+            lock=lock,
+        )
+        self.assertTrue(result)
+        mock_hf.assert_called_once()

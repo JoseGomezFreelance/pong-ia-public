@@ -1,0 +1,17 @@
+[Unit]
+Description=PongIA seed node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<USUARIO>
+WorkingDirectory=<RUTA_PROYECTO>
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+ExecStart=<RUTA_PROYECTO>/venv/bin/python <RUTA_PROYECTO>/seed_node.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -100,8 +100,8 @@ ZX_TITLE_PIXEL_SIZE = 4            # Cada pixel logico = 4x4 pixeles reales
 # ============================================================
 # Colores exactos del Sinclair ZX Spectrum (1982).
 # Se usan para el tema dinamico que acompana el estado emocional de la IA.
-ZX_BLACK          = (0, 0, 0)
-ZX_WHITE          = (255, 255, 255)
+ZX_BLACK          = (0, 0, 0)          # #000000
+ZX_WHITE          = (255, 255, 255)    # #FFFFFF
 ZX_GRAY_LIGHT     = (170, 170, 170)    # #AAAAAA
 ZX_GRAY_DARK      = (85, 85, 85)       # #555555
 ZX_BROWN          = (170, 85, 0)       # #AA5500

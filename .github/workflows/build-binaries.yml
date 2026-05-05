@@ -1,0 +1,63 @@
+name: Build executables
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+  # macOS y Windows se buildean localmente (torch+MPS/CUDA completos).
+  # CI solo buildea Linux, que no tenemos maquina local para hacerlo.
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-mixer-dev libsdl2-image-dev libsdl2-ttf-dev libfreetype6-dev
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pygame pyinstaller PyNaCl mido certifi
+
+      - name: Install AI dependencies (Stable Diffusion + LLM)
+        continue-on-error: true
+        run: |
+          python -m pip install --prefer-binary llama-cpp-python
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install diffusers transformers accelerate safetensors peft huggingface_hub
+
+      - name: Build executable
+        run: python scripts/build_with_pyinstaller.py
+
+      - name: Create tar.gz
+        run: |
+          cd dist
+          tar czf PongIA_Linux_x86_64.tar.gz PongIA/
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: pong-ia-linux-x86_64
+          path: dist/PongIA
+          if-no-files-found: error
+
+      - name: Upload tar.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: pong-ia-linux-tar
+          path: dist/PongIA_Linux_x86_64.tar.gz
+          if-no-files-found: warn

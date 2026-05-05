@@ -21,6 +21,7 @@ Contiene:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from pong.config.gameplay import GAME_POINTS_TO_WIN, MATCH_SETS_TO_WIN, SET_GAMES_TO_WIN
 
@@ -88,6 +89,28 @@ class ScoreState:
             f"PUNTOS {self.player_points}-{self.computer_points}"
         )
 
+    # -- Helpers internos para acceso por lado ("player"/"computer") --
+
+    _SIDE_NAMES: ClassVar[dict[str, tuple[str, str]]] = {
+        "player": ("jugador", "el jugador"),
+        "computer": ("ordenador", "el ordenador"),
+    }
+
+    def _get(self, side: str, attr: str) -> int:
+        """Lee un atributo por lado: _get("player", "points") -> self.player_points."""
+        result: int = getattr(self, f"{side}_{attr}")
+        return result
+
+    def _add(self, side: str, attr: str, value: int = 1) -> int:
+        """Suma a un atributo por lado y devuelve el nuevo valor."""
+        new: int = getattr(self, f"{side}_{attr}") + value
+        setattr(self, f"{side}_{attr}", new)
+        return new
+
+    def _set(self, side: str, attr: str, value: int) -> None:
+        """Asigna un valor a un atributo por lado."""
+        setattr(self, f"{side}_{attr}", value)
+
 
 # ============================================================
 # RESULTADO DE UN PUNTO
@@ -137,9 +160,9 @@ def apply_point(score: ScoreState, winner: str) -> PointResult:
 
     La logica escala asi:
     1. Siempre: sumar punto y actualizar rachas.
-    2. Si el punto llega al limite → cerrar juego, resetear puntos.
-    3. Si el juego llega al limite → cerrar set, resetear juegos.
-    4. Si el set llega al limite → cerrar partido.
+    2. Si el punto llega al limite -> cerrar juego, resetear puntos.
+    3. Si el juego llega al limite -> cerrar set, resetear juegos.
+    4. Si el set llega al limite -> cerrar partido.
 
     Args:
         score:  ScoreState con el marcador actual (se modifica in-place).
@@ -149,96 +172,52 @@ def apply_point(score: ScoreState, winner: str) -> PointResult:
         PointResult con el detalle de lo que ocurrio.
     """
 
+    loser = "computer" if winner == "player" else "player"
+    scorer_id, winner_name = ScoreState._SIDE_NAMES[winner]
+
     # --- Paso 1: Sumar punto y actualizar rachas ---
 
-    if winner == "player":
-        score.player_points += 1
-        winner_points = score.player_points
-        loser_points = score.computer_points
-        scorer_id = "jugador"
-        winner_name = "el jugador"
-        score.player_point_streak += 1
-        score.computer_point_streak = 0
-        scoring_streak = score.player_point_streak
-        event_label = "punto del jugador"
-    else:
-        score.computer_points += 1
-        winner_points = score.computer_points
-        loser_points = score.player_points
-        scorer_id = "ordenador"
-        winner_name = "el ordenador"
-        score.computer_point_streak += 1
-        score.player_point_streak = 0
-        scoring_streak = score.computer_point_streak
-        event_label = "punto del ordenador"
-
-    last_play = f"{winner_name.capitalize()} ganó el punto"
+    winner_points = score._add(winner, "points")
+    score._add(winner, "point_streak")
+    score._set(loser, "point_streak", 0)
+    scoring_streak = score._get(winner, "point_streak")
 
     result = PointResult(
         scorer_id=scorer_id,
-        event_label=event_label,
-        last_play=last_play,
+        event_label=f"punto del {scorer_id}",
+        last_play=f"{winner_name.capitalize()} ganó el punto",
         scoring_streak=scoring_streak,
     )
 
     # --- Paso 2: Comprobar si ese punto cierra un juego ---
 
     if winner_points < GAME_POINTS_TO_WIN:
-        # No se gano juego todavia, solo fue un punto normal
         return result
 
-    # Se gano el juego: sumar juego y resetear puntos
-    if winner == "player":
-        score.player_games += 1
-    else:
-        score.computer_games += 1
-
-    result.last_play = f"Juego para {winner_name}"
-    result.event_label = (
-        "juego del jugador" if winner == "player" else "juego del ordenador"
-    )
+    score._add(winner, "games")
     result.game_won = True
+    result.event_label = f"juego del {scorer_id}"
+    result.last_play = f"Juego para {winner_name}"
     score.player_points = 0
     score.computer_points = 0
 
     # --- Paso 3: Comprobar si ese juego cierra un set ---
 
-    if winner == "player":
-        winner_games = score.player_games
-    else:
-        winner_games = score.computer_games
-
-    if winner_games < SET_GAMES_TO_WIN:
-        # No se gano set todavia
+    if score._get(winner, "games") < SET_GAMES_TO_WIN:
         return result
 
-    # Se gano el set: sumar set y resetear juegos
-    if winner == "player":
-        score.player_sets += 1
-    else:
-        score.computer_sets += 1
-
-    result.last_play = f"Set para {winner_name}"
-    result.event_label = (
-        "set del jugador" if winner == "player" else "set del ordenador"
-    )
+    score._add(winner, "sets")
     result.set_won = True
+    result.event_label = f"set del {scorer_id}"
+    result.last_play = f"Set para {winner_name}"
 
     # --- Paso 4: Comprobar si ese set cierra el partido ---
 
-    if (
-        score.player_sets >= MATCH_SETS_TO_WIN
-        or score.computer_sets >= MATCH_SETS_TO_WIN
-    ):
-        result.last_play = f"Partido para {winner_name}"
-        result.event_label = (
-            "partido del jugador"
-            if winner == "player"
-            else "partido del ordenador"
-        )
+    if score._get(winner, "sets") >= MATCH_SETS_TO_WIN:
         result.match_won = True
+        result.event_label = f"partido del {scorer_id}"
+        result.last_play = f"Partido para {winner_name}"
     else:
-        # Nuevo set: resetear juegos
         score.player_games = 0
         score.computer_games = 0
         text = f"Comienza un nuevo set tras el set de {winner_name}"

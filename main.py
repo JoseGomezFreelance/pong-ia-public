@@ -9,7 +9,15 @@ Ejecuta el juego con:
 import argparse
 import logging
 import multiprocessing
+import os
 import sys
+
+# En modo --windowed (PyInstaller) stdout/stderr son None.
+# Librerías como huggingface_hub/tqdm escriben a stderr y fallan.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
 
 from pong.game import Game
 

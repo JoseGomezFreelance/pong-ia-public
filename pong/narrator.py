@@ -69,6 +69,12 @@ class LocalNarrator(NarratorQuestionsMixin, NarratorSummaryMixin):
         self.memory: deque[dict[str, str]] = deque(maxlen=10)
         self.status_message: str = llm.status_message
 
+    def reload_llm(self) -> None:
+        """Re-intenta cargar el LLM y sincroniza el estado."""
+        self._llm.reload()
+        self.enabled = self._llm.enabled
+        self.status_message = self._llm.status_message
+
     # --------------------------------------------------------
     # Metodo principal: generar narracion
     # --------------------------------------------------------

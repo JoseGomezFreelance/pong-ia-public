@@ -10,6 +10,7 @@ from pong.config.models import (
     LLMModelConfig,
     LoRAConfig,
     load_models_config,
+    save_llm_config,
 )
 
 
@@ -119,6 +120,94 @@ loras = []
         self.assertEqual(
             config.resolved_display_name, "qwen2.5-3b-instruct-q4_k_m"
         )
+
+
+class TestSaveLLMConfig(unittest.TestCase):
+    """Tests para save_llm_config."""
+
+    def test_save_creates_file(self) -> None:
+        config = LLMModelConfig(
+            filename="test-model.gguf",
+            download_url="https://example.com/test.gguf",
+            context_window=8192,
+            threads=8,
+            display_name="Test Model",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "models.toml"
+            save_llm_config(config, path)
+            self.assertTrue(path.exists())
+            content = path.read_text()
+            self.assertIn("[llm]", content)
+            self.assertIn('filename = "test-model.gguf"', content)
+            self.assertIn("context_window = 8192", content)
+            self.assertIn("threads = 8", content)
+            self.assertIn('display_name = "Test Model"', content)
+
+    def test_save_roundtrip(self) -> None:
+        config = LLMModelConfig(
+            filename="roundtrip.gguf",
+            download_url="https://example.com/rt.gguf",
+            context_window=4096,
+            threads=4,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "models.toml"
+            save_llm_config(config, path)
+            llm, _ = load_models_config(path)
+            self.assertEqual(llm.filename, "roundtrip.gguf")
+            self.assertEqual(llm.context_window, 4096)
+            self.assertEqual(llm.threads, 4)
+
+    def test_save_preserves_image_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "models.toml"
+            # Write initial file with image section
+            path.write_text(
+                '[llm]\nfilename = "old.gguf"\n\n'
+                '[image]\nmodel_id = "test/model"\nsteps = 4\n',
+                encoding="utf-8",
+            )
+            # Save new LLM config
+            new_config = LLMModelConfig(filename="new.gguf")
+            save_llm_config(new_config, path)
+
+            content = path.read_text()
+            self.assertIn('filename = "new.gguf"', content)
+            self.assertIn("[image]", content)
+            self.assertIn('model_id = "test/model"', content)
+            self.assertIn("steps = 4", content)
+
+    def test_save_without_display_name(self) -> None:
+        config = LLMModelConfig(filename="nodisplay.gguf")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "models.toml"
+            save_llm_config(config, path)
+            content = path.read_text()
+            self.assertNotIn("display_name", content)
+
+    def test_save_preserves_image_loras_and_scheduler(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "models.toml"
+            path.write_text(
+                '[llm]\nfilename = "old.gguf"\n\n'
+                "[image]\n"
+                'model_id = "test/model"\n'
+                "steps = 4\n\n"
+                "[image.scheduler]\n"
+                'type = "LCM"\n\n'
+                "[[image.loras]]\n"
+                'repo_id = "test/lora"\n'
+                "weight = 0.8\n",
+                encoding="utf-8",
+            )
+            new_config = LLMModelConfig(filename="new.gguf")
+            save_llm_config(new_config, path)
+
+            content = path.read_text()
+            self.assertIn("[image.scheduler]", content)
+            self.assertIn("[[image.loras]]", content)
+            self.assertIn('repo_id = "test/lora"', content)
 
 
 if __name__ == "__main__":

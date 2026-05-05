@@ -5,24 +5,24 @@ set -euo pipefail
 # create_dmg.sh -- Genera un .dmg instalador para macOS
 # =============================================================================
 # Uso:
-#   ./scripts/create_dmg.sh
+#   ./scripts/create_dmg.sh              # genera dist/PongIA.dmg
+#   ./scripts/create_dmg.sh PongIA_Beta_0.10  # nombre personalizado
 #
 # Requisitos:
 #   - dist/PongIA.app debe existir (ejecutar antes build_with_pyinstaller.py)
 #   - hdiutil (viene con macOS, no necesita instalacion)
 #
 # Resultado:
-#   dist/PongIA.dmg  (~1.2 GB comprimido)
+#   dist/<NOMBRE>.dmg  (comprimido con zlib-9)
 # =============================================================================
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 APP_PATH="${DIST_DIR}/PongIA.app"
-DMG_NAME="PongIA"
+DMG_NAME="${1:-PongIA}"
 DMG_PATH="${DIST_DIR}/${DMG_NAME}.dmg"
-DMG_TEMP="${DIST_DIR}/${DMG_NAME}_temp.dmg"
+STAGING_DIR=$(mktemp -d)
 VOLUME_NAME="PongIA"
-STAGING_DIR="${DIST_DIR}/dmg_staging"
 
 # --- Verificar que el .app existe ---
 if [[ ! -d "${APP_PATH}" ]]; then
@@ -34,13 +34,11 @@ fi
 echo "=== Creando DMG para PongIA ==="
 echo ""
 
-# --- Limpiar archivos anteriores ---
-rm -f "${DMG_PATH}" "${DMG_TEMP}"
-rm -rf "${STAGING_DIR}"
+# --- Limpiar DMG anterior si existe ---
+rm -f "${DMG_PATH}"
 
 # --- Preparar directorio de staging ---
-echo "[1/4] Preparando contenido del DMG..."
-mkdir -p "${STAGING_DIR}"
+echo "[1/3] Preparando contenido del DMG..."
 
 # Copiar .app al staging
 cp -R "${APP_PATH}" "${STAGING_DIR}/"
@@ -48,35 +46,25 @@ cp -R "${APP_PATH}" "${STAGING_DIR}/"
 # Crear enlace simbolico a /Applications (para drag & drop)
 ln -s /Applications "${STAGING_DIR}/Applications"
 
-# --- Calcular tamano necesario ---
-echo "[2/4] Calculando tamano..."
-APP_SIZE_KB=$(du -sk "${STAGING_DIR}" | awk '{print $1}')
-# Anadir 20% de margen (HFS+ necesita espacio extra para metadatos)
-DMG_SIZE_KB=$(( APP_SIZE_KB + APP_SIZE_KB / 5 ))
+# Icono personalizado del volumen DMG
+ICON_PATH="${ROOT_DIR}/assets/images/icon.icns"
+if [[ -f "${ICON_PATH}" ]]; then
+    cp "${ICON_PATH}" "${STAGING_DIR}/.VolumeIcon.icns"
+fi
 
-# --- Crear DMG temporal (lectura/escritura) ---
-echo "[3/4] Creando imagen de disco..."
+# --- Crear DMG comprimido directamente ---
+echo "[2/3] Creando imagen de disco comprimida..."
 hdiutil create \
     -srcfolder "${STAGING_DIR}" \
     -volname "${VOLUME_NAME}" \
     -fs HFS+ \
-    -fsargs "-c c=64,a=16,e=16" \
-    -format UDRW \
-    -size "${DMG_SIZE_KB}k" \
-    "${DMG_TEMP}" \
-    -quiet
-
-# --- Convertir a DMG comprimido (solo lectura) ---
-echo "[4/4] Comprimiendo DMG final..."
-hdiutil convert \
-    "${DMG_TEMP}" \
     -format UDZO \
     -imagekey zlib-level=9 \
     -o "${DMG_PATH}" \
     -quiet
 
 # --- Limpiar ---
-rm -f "${DMG_TEMP}"
+echo "[3/3] Limpiando..."
 rm -rf "${STAGING_DIR}"
 
 # --- Resultado ---

@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from pong.emotional_state import (
+    VALID_MOOD_TAGS,
     EmotionalState,
     _clamp,
     parse_emotion_from_llm,
@@ -131,6 +132,38 @@ class ParseEmotionFromLLMTests(unittest.TestCase):
         self.assertIsNotNone(emotion)
         assert emotion is not None
         self.assertAlmostEqual(emotion.aggressiveness, 0.6)
+
+    def test_non_numeric_values_return_none(self) -> None:
+        raw = json.dumps({
+            "pregunta": "Algo?",
+            "emocion": {
+                "agresividad": "alta",
+                "estabilidad": 0.5,
+                "motivacion": 0.7,
+                "humor": "tenso",
+            },
+        })
+        self.assertIsNone(parse_emotion_from_llm(raw))
+
+    def test_unknown_mood_tag_falls_back_to_neutral(self) -> None:
+        raw = json.dumps({
+            "pregunta": "Algo?",
+            "emocion": {
+                "agresividad": 0.5,
+                "estabilidad": 0.5,
+                "motivacion": 0.5,
+                "humor": "confuso",
+            },
+        })
+        emotion = parse_emotion_from_llm(raw)
+        self.assertIsNotNone(emotion)
+        assert emotion is not None
+        self.assertEqual(emotion.mood_tag, "neutral")
+
+    def test_valid_mood_tags_constant(self) -> None:
+        expected = {"neutral", "relajado", "tenso", "irritado", "furioso",
+                    "deprimido", "aburrido", "euforico", "erratico"}
+        self.assertEqual(VALID_MOOD_TAGS, expected)
 
     def test_defaults_for_missing_fields(self) -> None:
         raw = json.dumps({

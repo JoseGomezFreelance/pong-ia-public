@@ -7,12 +7,14 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from pong.config.gameplay import (
+    AI_RALLY_PRESS_STEP,
+    AI_RALLY_PRESS_THRESHOLD,
     AI_SPEED,
     AI_SPEED_MAX,
     AI_SPEED_MIN,
     PADDLE_HEIGHT,
 )
-from pong.config.layout import GAME_AREA_HEIGHT
+from pong.config.layout import GAME_AREA_HEIGHT, WINDOW_WIDTH
 from pong.emotional_state import EmotionalState
 from pong.entities import Paddle, Ball
 
@@ -24,14 +26,16 @@ def _make_ai_stub(**overrides: Any) -> Any:
     ball.rect.centery = GAME_AREA_HEIGHT // 2
 
     computer = Paddle(780, GAME_AREA_HEIGHT // 2 - PADDLE_HEIGHT // 2)
+    match = SimpleNamespace(rally_hits=0)
 
     g = SimpleNamespace(
         ball=ball,
         computer=computer,
+        computer_home_x=computer.rect.x,
+        match=match,
         emotion_active=False,
         emotional_state=EmotionalState(),
         emotional_target=EmotionalState(),
-        rally_hits=0,
         _player_positions=[],
         _player_idle_score=0.0,
         questions=SimpleNamespace(dialogue_history=[]),
@@ -43,7 +47,10 @@ def _make_ai_stub(**overrides: Any) -> Any:
     g._apply_autonomous_emotion = GameAIMixin._apply_autonomous_emotion.__get__(g)
 
     for key, value in overrides.items():
-        setattr(g, key, value)
+        if key == "rally_hits":
+            g.match.rally_hits = value
+        else:
+            setattr(g, key, value)
     return g
 
 
@@ -137,6 +144,25 @@ class TestUpdateAIEmotional(unittest.TestCase):
         # Movement should be minimal (only rounding)
         moved = abs(g.computer.rect.centery - initial_y)
         self.assertLessEqual(moved, 1)
+
+
+class TestUpdateAIRallyPressure(unittest.TestCase):
+    """Presion lateral extra en rallies muy largos."""
+
+    def test_computer_stays_home_until_press_threshold(self) -> None:
+        g = _make_ai_stub(rally_hits=AI_RALLY_PRESS_THRESHOLD)
+        g.update_ai()
+        self.assertEqual(g.computer.rect.x, g.computer_home_x)
+
+    def test_computer_moves_toward_player_after_threshold(self) -> None:
+        g = _make_ai_stub(rally_hits=AI_RALLY_PRESS_THRESHOLD + 1)
+        g.update_ai()
+        self.assertEqual(g.computer.rect.x, g.computer_home_x - AI_RALLY_PRESS_STEP)
+
+    def test_computer_press_caps_at_midfield(self) -> None:
+        g = _make_ai_stub(rally_hits=AI_RALLY_PRESS_THRESHOLD + 500)
+        g.update_ai()
+        self.assertEqual(g.computer.rect.x, WINDOW_WIDTH // 2)
 
 
 if __name__ == "__main__":

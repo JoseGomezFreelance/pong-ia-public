@@ -28,6 +28,7 @@ import pygame
 if TYPE_CHECKING:
     from pong.achievements import AchievementDef
     from pong.entities import Ball, Paddle
+    from pong.rpg_engine import RPGState
     from pong.scoring import ScoreState
 
 from pong.config.gameplay import PADDLE_HEIGHT
@@ -50,6 +51,8 @@ from pong.config.layout import (
     SCORE_FONT_SIZE,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
+    XP_BAR_HEIGHT,
+    XP_BAR_TOP,
 )
 from pong.config.media import IMAGEGEN_OVERLAY_ALPHA, IMAGEGEN_TRANSITION_SECONDS
 from pong.config.narrator import ANSWER_FONT_SIZE, ANSWER_LABEL_X, COLOR_ANSWER_INACTIVE, COUNTDOWN_FONT_SIZE
@@ -59,9 +62,11 @@ from pong.theme import ThemeColors
 
 from pong.renderer_end_screen import EndScreenMixin
 from pong.renderer_achievements import AchievementsMixin
+from pong.renderer_leaderboard import LeaderboardRendererMixin
+from pong.renderer_rpg import RPGRendererMixin
 
 
-class Renderer(EndScreenMixin, AchievementsMixin):
+class Renderer(LeaderboardRendererMixin, RPGRendererMixin, EndScreenMixin, AchievementsMixin):
     """
     Dibuja todos los elementos visuales del juego en la pantalla.
 
@@ -108,6 +113,12 @@ class Renderer(EndScreenMixin, AchievementsMixin):
         self.debug_button_rect: pygame.Rect | None = None
         self.debug_back_button_rect: pygame.Rect = self._build_achievements_back_button_rect()
         self.achievements_back_button_rect: pygame.Rect = self._build_achievements_back_button_rect()
+
+        # --- RPG ---
+        self._init_rpg_renderer()
+
+        # --- Leaderboard ---
+        self._init_leaderboard_renderer()
 
         # --- Fondo generativo (fase visual con IA de imagen) ---
         self._bg_surface: pygame.Surface | None = None          # Surface actual del fondo generado
@@ -178,7 +189,9 @@ class Renderer(EndScreenMixin, AchievementsMixin):
                   llm_enabled: bool = False,
                   colors: ThemeColors | None = None,
                   paused: bool = False,
-                  achievement_popup: tuple[AchievementDef, float] | None = None) -> None:
+                  achievement_popup: tuple[AchievementDef, float] | None = None,
+                  rpg: RPGState | None = None,
+                  extra_balls: list[Ball] | None = None) -> None:
         """
         Dibuja un frame completo de la pantalla de juego.
 
@@ -212,6 +225,26 @@ class Renderer(EndScreenMixin, AchievementsMixin):
         player.draw(self.screen, y_offset=GAME_AREA_TOP, color=colors.player_paddle)
         computer.draw(self.screen, y_offset=GAME_AREA_TOP, color=colors.computer_paddle)
         ball.draw(self.screen, y_offset=GAME_AREA_TOP, color=colors.ball)
+
+        # Bolas extra (dual instinct)
+        if extra_balls:
+            for eb in extra_balls:
+                eb.draw(self.screen, y_offset=GAME_AREA_TOP, color=colors.ball)
+
+        # Prediccion de trayectoria (habilidad de ascension)
+        if rpg is not None and rpg.has_trajectory_prediction():
+            self.draw_trajectory_prediction(ball, colors, rpg.get_trajectory_distance())
+
+        # Barra de XP RPG
+        if rpg is not None:
+            self.draw_xp_bar(rpg, colors)
+        else:
+            # Zona vacia con fondo de narracion
+            narr_bg = colors.narration_bg if colors else (20, 20, 20)
+            pygame.draw.rect(
+                self.screen, narr_bg,
+                (0, XP_BAR_TOP, WINDOW_WIDTH, XP_BAR_HEIGHT),
+            )
 
         # Durante una pregunta activa, la zona de narracion inferior muestra
         # la pregunta en lugar del comentario normal del narrador.

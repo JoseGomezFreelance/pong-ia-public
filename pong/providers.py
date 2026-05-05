@@ -23,7 +23,13 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    import pygame
+
+    from pong.config.models import ImageModelConfig, LLMModelConfig
+    from pong.perf import PerformanceMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +70,15 @@ class ImageGenProviderProtocol(Protocol):
     @property
     def is_ready(self) -> bool: ...
 
-    def set_perf(self, perf: Any) -> None: ...
+    def set_perf(self, perf: PerformanceMetrics) -> None: ...
 
-    def set_log_fn(self, fn: Any) -> None: ...
+    def set_log_fn(self, fn: Callable[[str, str], None]) -> None: ...
 
     def activate(self) -> None: ...
 
     def request(self, prompt: str, negative_prompt: str = "") -> None: ...
 
-    def consume(self) -> Any | None: ...
+    def consume(self) -> pygame.Surface | None: ...
 
     def shutdown(self) -> None: ...
 
@@ -112,6 +118,13 @@ def resolve_model_path(model_relative_path: Path) -> Path:
 
     # 4. Para binarios empaquetados con PyInstaller
     if getattr(sys, "frozen", False):
+        # Application Support (ubicacion canonica para datos del usuario)
+        if sys.platform == "darwin":
+            app_support = Path.home() / "Library" / "Application Support" / "PongIA"
+        else:
+            app_support = Path(os.environ.get("APPDATA", Path.home())) / "PongIA"
+        candidates.append(app_support / model_relative_path)
+
         executable_dir = Path(sys.executable).resolve().parent
         candidates.append(executable_dir / model_relative_path)
         candidates.append(executable_dir.parent / model_relative_path)
@@ -146,6 +159,26 @@ def resolve_model_path(model_relative_path: Path) -> Path:
     return ordered[0]
 
 
+def _detect_gpu_layers() -> int:
+    """Detecta cuantas capas offloadear a GPU para llama-cpp.
+
+    Returns:
+        0 para CPU, -1 para MPS (Apple Silicon) o CUDA (todas las capas).
+
+    En Apple Silicon la memoria es unificada (GPU = RAM total), por lo que
+    se offloadean todas las capas a Metal igual que en CUDA.
+    """
+    try:
+        import torch
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return -1
+        if torch.cuda.is_available():
+            return -1
+    except Exception:
+        pass
+    return 0
+
+
 # ============================================================
 # LocalLLMProvider — implementacion built-in con llama-cpp
 # ============================================================
@@ -158,7 +191,7 @@ class LocalLLMProvider:
     logica de narracion.
     """
 
-    def __init__(self, config: Any | None = None) -> None:
+    def __init__(self, config: LLMModelConfig | None = None) -> None:
         from pong.config.models import LLMModelConfig
 
         if config is None:
@@ -175,6 +208,20 @@ class LocalLLMProvider:
 
     def _load_model(self) -> None:
         """Intenta cargar el modelo LLM desde disco."""
+        # Safety net: no intentar cargar llama_cpp si la CPU no tiene AVX2
+        # (evita SIGILL en CPUs pre-Haswell)
+        try:
+            from pong.system_info import detect_system_info
+            info = detect_system_info()
+            if not info.has_avx2:
+                self._enabled = False
+                self._status_message = (
+                    "Narrador IA no disponible: CPU sin soporte AVX2"
+                )
+                return
+        except Exception:
+            pass  # Si falla la deteccion, intentar cargar igualmente
+
         model_relative_path = Path("models") / self._config.filename
         model_path = resolve_model_path(model_relative_path)
 
@@ -183,10 +230,12 @@ class LocalLLMProvider:
 
         try:
             llama_cpp = importlib.import_module("llama_cpp")
+            n_gpu_layers = _detect_gpu_layers()
             self._model = llama_cpp.Llama(
                 model_path=str(model_path),
                 n_ctx=self._config.context_window,
                 n_threads=self._config.threads,
+                n_gpu_layers=n_gpu_layers,
                 verbose=False,
             )
             self._enabled = True
@@ -202,6 +251,24 @@ class LocalLLMProvider:
         except Exception as exc:
             self._enabled = False
             self._status_message = f"Error al cargar IA local: {exc}"
+
+    def reload(self) -> None:
+        """Recarga el modelo LLM (tras descarga o cambio de modelo).
+
+        Lee la configuracion actualizada de models.toml para detectar
+        cambios de modelo.
+        """
+        from pong.config.models import load_models_config
+
+        new_config, _ = load_models_config()
+        config_changed = new_config.filename != self._config.filename
+        if config_changed:
+            self._config = new_config
+            self._model = None
+            self._enabled = False
+
+        if not self._enabled:
+            self._load_model()
 
     @property
     def enabled(self) -> bool:
@@ -260,12 +327,28 @@ def _load_entry_point(group: str, name: str) -> Any:
     return None
 
 
-def load_llm_provider(config: Any | None = None) -> LLMProviderProtocol:
+def _try_onnx_provider() -> LLMProviderProtocol:
+    """Intenta cargar OnnxLLMProvider como fallback para CPUs sin AVX2.
+
+    Returns:
+        OnnxLLMProvider si onnxruntime esta disponible, o un
+        LocalLLMProvider disabled si no lo esta.
+    """
+    try:
+        from pong.onnx_provider import OnnxLLMProvider
+        return OnnxLLMProvider()
+    except Exception as exc:
+        logger.debug("No se pudo cargar OnnxLLMProvider: %s", exc)
+        return LocalLLMProvider()
+
+
+def load_llm_provider(config: LLMModelConfig | None = None) -> LLMProviderProtocol:
     """Carga el proveedor de LLM configurado.
 
     Orden de resolucion:
     1. Variable ``PONG_IA_LLM_PROVIDER`` → busca en entry_points ``pong_ia.llm``.
-    2. Si no hay variable o no se encuentra el entry_point, usa ``LocalLLMProvider``.
+    2. Si la CPU no tiene AVX2, intenta ``OnnxLLMProvider``.
+    3. Fallback: ``LocalLLMProvider``.
 
     Args:
         config: ``LLMModelConfig`` opcional.  Si es ``None`` se usan defaults.
@@ -285,10 +368,19 @@ def load_llm_provider(config: Any | None = None) -> LLMProviderProtocol:
             name,
         )
 
+    # Si la CPU no tiene AVX2, intentar ONNX provider
+    try:
+        from pong.system_info import detect_system_info
+        info = detect_system_info()
+        if not info.has_avx2:
+            return _try_onnx_provider()
+    except Exception:
+        pass
+
     return LocalLLMProvider(config)
 
 
-def load_imagegen_provider(config: Any | None = None) -> ImageGenProviderProtocol:
+def load_imagegen_provider(config: ImageModelConfig | None = None) -> ImageGenProviderProtocol:
     """Carga el proveedor de generacion de imagenes configurado.
 
     Orden de resolucion:

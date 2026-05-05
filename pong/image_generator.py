@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any, Callable
 if TYPE_CHECKING:
     import pygame
 
+    from pong.config.models import ImageModelConfig
+
 from pong.config.layout import GAME_AREA_HEIGHT, WINDOW_WIDTH
 from pong.config.media import (
     IMAGEGEN_CACHE_DIR,
@@ -47,7 +49,7 @@ def _get_image_config() -> Any:
     return image_config
 
 
-def is_model_cached(config: Any | None = None) -> bool:
+def is_model_cached(config: ImageModelConfig | None = None) -> bool:
     """Comprueba si los pesos del modelo SD y LoRAs estan en la cache local.
 
     Ademas de verificar que existan los repos, comprueba que el modelo base
@@ -62,6 +64,9 @@ def is_model_cached(config: Any | None = None) -> bool:
 
     try:
         from huggingface_hub import scan_cache_dir
+
+        if not IMAGEGEN_CACHE_DIR.is_dir():
+            return False
 
         cache_info = scan_cache_dir(str(IMAGEGEN_CACHE_DIR))
         repos = {repo.repo_id: repo for repo in cache_info.repos}
@@ -86,7 +91,7 @@ def is_model_cached(config: Any | None = None) -> bool:
 
 def ensure_models_downloaded(
     progress_callback: Callable[[str], None] | None = None,
-    config: Any | None = None,
+    config: ImageModelConfig | None = None,
 ) -> bool:
     """
     Descarga los pesos del modelo SD y LoRAs a disco sin cargarlos.
@@ -464,7 +469,7 @@ class ImageGenerator:
             renderer.set_background_image(surface)
     """
 
-    def __init__(self, config: Any | None = None) -> None:
+    def __init__(self, config: ImageModelConfig | None = None) -> None:
         self._state: str = "idle"  # idle / loading / ready / generating
         self._target_size: tuple[int, int] = (WINDOW_WIDTH, GAME_AREA_HEIGHT)
         self._config = config  # ImageModelConfig o None

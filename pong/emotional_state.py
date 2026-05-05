@@ -48,6 +48,13 @@ class EmotionalState:
 DEFAULT_EMOTIONAL_STATE = EmotionalState()
 
 
+# ── Tags de humor válidos ────────────────────────────────────
+
+VALID_MOOD_TAGS: frozenset[str] = frozenset({
+    "neutral", "relajado", "tenso", "irritado", "furioso",
+    "deprimido", "aburrido", "euforico", "erratico",
+})
+
 # ── Parsing del JSON emocional que genera el LLM ────────────
 
 # Regex para extraer el primer bloque JSON de una cadena que puede contener
@@ -79,11 +86,22 @@ def parse_emotion_from_llm(raw_text: str) -> EmotionalState | None:
     if not isinstance(emo_raw, dict):
         return None
 
+    try:
+        aggressiveness = _clamp(float(emo_raw.get("agresividad", 0.5)))
+        stability = _clamp(float(emo_raw.get("estabilidad", 0.8)))
+        motivation = _clamp(float(emo_raw.get("motivacion", 0.7)))
+    except (ValueError, TypeError):
+        return None
+
+    mood_tag = str(emo_raw.get("humor", "neutral"))
+    if mood_tag not in VALID_MOOD_TAGS:
+        mood_tag = "neutral"
+
     return EmotionalState(
-        aggressiveness=_clamp(float(emo_raw.get("agresividad", 0.5))),
-        stability=_clamp(float(emo_raw.get("estabilidad", 0.8))),
-        motivation=_clamp(float(emo_raw.get("motivacion", 0.7))),
-        mood_tag=str(emo_raw.get("humor", "neutral")),
+        aggressiveness=aggressiveness,
+        stability=stability,
+        motivation=motivation,
+        mood_tag=mood_tag,
     )
 
 

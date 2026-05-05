@@ -24,6 +24,7 @@ SYSTEM_TO_TARGET = {
 PONG_HIDDEN_IMPORTS = [
     "pong",
     "pong.__init__",
+    # config
     "pong.config",
     "pong.config.__init__",
     "pong.config.layout",
@@ -36,6 +37,11 @@ PONG_HIDDEN_IMPORTS = [
     "pong.config.zx_spectrum",
     "pong.config.ui_end_screen",
     "pong.config.ui_achievements",
+    "pong.config.ui_leaderboard",
+    "pong.config.ui_rpg",
+    "pong.config.llm_tiers",
+    "pong.config.rpg",
+    # core game
     "pong.entities",
     "pong.sound",
     "pong.music",
@@ -43,23 +49,42 @@ PONG_HIDDEN_IMPORTS = [
     "pong.game_ai",
     "pong.game_persistence",
     "pong.game_imagegen",
+    "pong.game_rpg",
+    "pong.game_state",
     "pong.scoring",
+    # narration + IA
     "pong.narrator",
     "pong.narrator_questions",
     "pong.narrator_summary",
     "pong.narration_bridge",
+    "pong.providers",
+    "pong.onnx_provider",
+    "pong.bpe_tokenizer",
+    "pong.image_generator",
+    # rendering
     "pong.renderer",
     "pong.renderer_achievements",
     "pong.renderer_end_screen",
-    "pong.image_generator",
-    "pong.providers",
+    "pong.renderer_leaderboard",
+    "pong.renderer_rpg",
+    "pong.splash",
+    "pong.theme",
+    # P2P + crypto
+    "pong.p2p",
+    "pong.p2p_cache",
+    "pong.punch",
+    "pong.crypto",
+    "pong.leaderboard",
+    # persistence + misc
     "pong.save_manager",
     "pong.emotional_state",
     "pong.achievements",
     "pong.achievement_icons",
-    "pong.splash",
-    "pong.theme",
+    "pong.rpg_engine",
     "pong.question_system",
+    "pong.system_info",
+    "pong.model_downloader",
+    "pong.benchmark",
     "pong.perf",
     "pong.harness",
     "pong.exceptions",
@@ -72,6 +97,8 @@ THIRD_PARTY_HIDDEN_IMPORTS: list[tuple[str, list[str]]] = [
     ("llama_cpp", ["llama_cpp"]),
     ("mido", ["mido", "mido.backends", "mido.backends.backend_python"]),
     ("tomli", ["tomli"]),
+    ("nacl", ["nacl", "nacl.signing", "nacl.public", "nacl.utils",
+              "nacl.bindings", "nacl.encoding", "_cffi_backend"]),
     ("torch", [
         "torch",
         "torch.utils",
@@ -95,15 +122,24 @@ THIRD_PARTY_HIDDEN_IMPORTS: list[tuple[str, list[str]]] = [
 ]
 
 # Modulos que no necesitamos en el ejecutable (reducen tamanio).
+# matplotlib, jedi, IPython entran como deps transitivas de torch/transformers
+# pero no se usan en ningun import del proyecto.
 EXCLUDE_MODULES = [
     "tkinter",
     "xmlrpc",
     "doctest",
     "distutils",
+    "matplotlib",
+    "jedi",
+    "IPython",
+    "scipy",
+    "pandas",
+    "notebook",
+    "jupyterlab",
 ]
 
-# Exclusiones extra para macOS (no hay CUDA).
-MAC_EXCLUDE_MODULES = [
+# Exclusiones extra para macOS y Linux (no hay CUDA en builds CI).
+NON_CUDA_EXCLUDE_MODULES = [
     "torch.cuda",
     "torch.distributed",
     "torch.testing",
@@ -132,11 +168,14 @@ def build_command(target: str, onefile: bool) -> list[str]:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--windowed",
         "--strip",
         "--name",
         APP_NAME,
     ]
+    # --windowed: crea .app en macOS, oculta consola en Windows.
+    # En Linux no se usa (no hay bundle .app y puede fallar sin display).
+    if target in ("mac", "win"):
+        command.append("--windowed")
     if onefile:
         command.append("--onefile")
 
@@ -152,6 +191,14 @@ def build_command(target: str, onefile: bool) -> list[str]:
     if target == "mac":
         command.extend(["--osx-bundle-identifier", "com.pongia.app"])
 
+    # Icono de la aplicacion
+    icon_ext = ".icns" if target == "mac" else ".ico"
+    icon_path = PROJECT_ROOT / "assets" / "images" / f"icon{icon_ext}"
+    if icon_path.exists():
+        command.extend(["--icon", str(icon_path)])
+    else:
+        print(f"AVISO: No se encontro {icon_path.relative_to(PROJECT_ROOT)} — sin icono personalizado")
+
     # Hidden imports: todos los modulos pong
     for module in PONG_HIDDEN_IMPORTS:
         command.extend(["--hidden-import", module])
@@ -163,18 +210,23 @@ def build_command(target: str, onefile: bool) -> list[str]:
                 command.extend(["--hidden-import", imp])
 
     # Collect-submodules para paquetes con muchos submodulos dinamicos
-    for pkg in ("diffusers.schedulers", "torch.backends"):
+    for pkg in ("diffusers.schedulers", "torch.backends", "llama_cpp"):
         check = pkg.split(".")[0]
         if is_module_available(check):
             command.extend(["--collect-submodules", pkg])
+
+    # llama_cpp necesita sus libs nativas (.dylib/.dll) y datos
+    if is_module_available("llama_cpp"):
+        command.extend(["--collect-data", "llama_cpp"])
+        command.extend(["--collect-binaries", "llama_cpp"])
 
     # Exclusiones globales para reducir tamanio
     for module in EXCLUDE_MODULES:
         command.extend(["--exclude-module", module])
 
-    # Exclusiones extra en macOS (sin CUDA)
-    if target == "mac":
-        for module in MAC_EXCLUDE_MODULES:
+    # Exclusiones extra en macOS y Linux (sin CUDA en builds CI)
+    if target in ("mac", "linux"):
+        for module in NON_CUDA_EXCLUDE_MODULES:
             command.extend(["--exclude-module", module])
 
     command.append(str(ENTRYPOINT))

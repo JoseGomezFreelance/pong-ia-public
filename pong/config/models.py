@@ -22,6 +22,7 @@ __all__ = [
     "LoRAConfig",
     "ImageModelConfig",
     "load_models_config",
+    "save_llm_config",
 ]
 
 
@@ -142,6 +143,19 @@ def _parse_image(data: dict[str, Any]) -> ImageModelConfig:
     )
 
 
+def _resolve_toml_path(toml_path: Path | None) -> Path:
+    """Resuelve la ruta de models.toml (desarrollo y PyInstaller)."""
+    if toml_path is not None:
+        return toml_path
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        if exe_dir.name == "MacOS" and exe_dir.parent.name == "Contents":
+            return exe_dir.parent.parent.parent / "models.toml"
+        return exe_dir / "models.toml"
+    # Desarrollo: __file__ -> pong/config/models.py => raiz
+    return Path(__file__).resolve().parent.parent.parent / "models.toml"
+
+
 def load_models_config(
     toml_path: Path | None = None,
 ) -> tuple[LLMModelConfig, ImageModelConfig]:
@@ -156,17 +170,7 @@ def load_models_config(
     Returns:
         Tupla ``(LLMModelConfig, ImageModelConfig)``.
     """
-    if toml_path is None:
-        if getattr(sys, "frozen", False):
-            # Ejecutable empaquetado: buscar junto al .app/.exe
-            exe_dir = Path(sys.executable).resolve().parent
-            if exe_dir.name == "MacOS" and exe_dir.parent.name == "Contents":
-                toml_path = exe_dir.parent.parent.parent / "models.toml"
-            else:
-                toml_path = exe_dir / "models.toml"
-        else:
-            # Desarrollo: __file__ -> pong/config/models.py => raiz
-            toml_path = Path(__file__).resolve().parent.parent.parent / "models.toml"
+    toml_path = _resolve_toml_path(toml_path)
 
     llm_config = LLMModelConfig()
     image_config = ImageModelConfig()
@@ -186,3 +190,78 @@ def load_models_config(
         image_config = _parse_image(raw["image"])
 
     return llm_config, image_config
+
+
+def save_llm_config(
+    config: LLMModelConfig,
+    toml_path: Path | None = None,
+) -> None:
+    """Escribe la seccion [llm] en models.toml, preservando [image].
+
+    Si el archivo ya existe, lee la seccion ``[image]`` y la reescribe
+    intacta junto con la nueva ``[llm]``.
+    """
+    toml_path = _resolve_toml_path(toml_path)
+
+    # Leer seccion [image] existente (si hay)
+    image_lines: list[str] = []
+    if toml_path.exists():
+        try:
+            raw = _load_toml(toml_path)
+            if "image" in raw:
+                image_lines = _serialize_image_section(raw["image"])
+        except Exception:
+            pass
+
+    lines: list[str] = [
+        "[llm]",
+        f'filename = "{config.filename}"',
+        f'download_url = "{config.download_url}"',
+        f"context_window = {config.context_window}",
+        f"threads = {config.threads}",
+    ]
+    if config.display_name:
+        lines.append(f'display_name = "{config.display_name}"')
+
+    if image_lines:
+        lines.append("")
+        lines.extend(image_lines)
+
+    lines.append("")  # newline final
+
+    toml_path.parent.mkdir(parents=True, exist_ok=True)
+    toml_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("Configuracion LLM guardada en %s", toml_path)
+
+
+def _serialize_image_section(data: dict[str, Any]) -> list[str]:
+    """Serializa la seccion [image] a lineas TOML."""
+    lines: list[str] = ["[image]"]
+    for key, value in data.items():
+        if key == "loras":
+            for lora in value:
+                lines.append("")
+                lines.append("[[image.loras]]")
+                for lk, lv in lora.items():
+                    lines.append(f'{lk} = {_toml_value(lv)}')
+        elif key == "scheduler":
+            lines.append("")
+            lines.append("[image.scheduler]")
+            for sk, sv in value.items():
+                lines.append(f'{sk} = {_toml_value(sv)}')
+        else:
+            lines.append(f'{key} = {_toml_value(value)}')
+    return lines
+
+
+def _toml_value(value: Any) -> str:
+    """Formatea un valor Python como valor TOML."""
+    if isinstance(value, str):
+        return f'"{value}"'
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    return f'"{value}"'

@@ -7,6 +7,8 @@ __all__ = [
     "NARRATION_HEIGHT",
     "SCORE_BAND_HEIGHT",
     "GAME_AREA_TOP",
+    "XP_BAR_HEIGHT",
+    "XP_BAR_TOP",
     "NARRATION_TOP",
     "WINDOW_HEIGHT",
     # Marcador y fuentes
@@ -30,19 +32,22 @@ __all__ = [
 # ============================================================
 # VENTANA Y DISPOSICION (layout)
 # ============================================================
-# La ventana se divide en tres zonas apiladas de arriba a abajo:
+# La ventana se divide en cuatro zonas apiladas de arriba a abajo:
 #   1. Banda de marcador  (SCORE_BAND_HEIGHT)
 #   2. Zona de juego      (GAME_AREA_HEIGHT)
-#   3. Zona de narracion  (NARRATION_HEIGHT)
+#   3. Barra de XP RPG    (XP_BAR_HEIGHT)  — vacia si RPG no activo
+#   4. Zona de narracion  (NARRATION_HEIGHT)
 
 WINDOW_WIDTH = 800
 GAME_AREA_HEIGHT = 500
 NARRATION_HEIGHT = 200
 SCORE_BAND_HEIGHT = 44
+XP_BAR_HEIGHT = 22
 
 # Posiciones calculadas a partir de las alturas anteriores
 GAME_AREA_TOP = SCORE_BAND_HEIGHT
-NARRATION_TOP = GAME_AREA_TOP + GAME_AREA_HEIGHT
+XP_BAR_TOP = GAME_AREA_TOP + GAME_AREA_HEIGHT
+NARRATION_TOP = XP_BAR_TOP + XP_BAR_HEIGHT
 WINDOW_HEIGHT = NARRATION_TOP + NARRATION_HEIGHT
 
 

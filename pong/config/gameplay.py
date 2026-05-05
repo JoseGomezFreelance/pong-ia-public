@@ -10,12 +10,17 @@ __all__ = [
     "BALL_SIZE",
     "BALL_SPEED_X",
     "BALL_SPEED_Y",
+    "BALL_RALLY_SPEEDUP_THRESHOLD",
+    "BALL_RALLY_SPEEDUP_STEP",
+    "BALL_RALLY_MAX_SPEED_MULTIPLIER",
     # IA del ordenador
     "AI_SPEED",
     "AI_REACTION_ZONE",
     "AI_SPEED_MIN",
     "AI_SPEED_MAX",
     "EMOTION_LERP_FACTOR",
+    "AI_RALLY_PRESS_THRESHOLD",
+    "AI_RALLY_PRESS_STEP",
     # Deteccion de inactividad del jugador
     "PLAYER_TRACK_WINDOW",
     "PLAYER_IDLE_VARIANCE_THRESHOLD",
@@ -27,6 +32,7 @@ __all__ = [
     "MATCH_SETS_TO_WIN",
     # Velocidad del juego
     "FPS",
+    "AGENT_MODE_SPEED_MULTIPLIER",
 ]
 
 
@@ -45,6 +51,9 @@ PADDLE_MARGIN = 30         # Distancia desde el borde de la ventana a la paleta
 BALL_SIZE = 12             # Lado del cuadrado de la pelota (pixeles)
 BALL_SPEED_X = 5           # Velocidad horizontal inicial (pixeles/frame)
 BALL_SPEED_Y = 5           # Velocidad vertical inicial (pixeles/frame)
+BALL_RALLY_SPEEDUP_THRESHOLD = 100       # A partir del golpe 101 acelera
+BALL_RALLY_SPEEDUP_STEP = 0.01           # +1% por golpe tras el umbral
+BALL_RALLY_MAX_SPEED_MULTIPLIER = 2.5    # Tope de velocidad acumulada
 
 
 # ============================================================
@@ -60,6 +69,8 @@ AI_REACTION_ZONE = 10      # Zona muerta: la IA no se mueve si esta a menos de
 AI_SPEED_MIN = 2           # Velocidad minima (relajado / rendido)
 AI_SPEED_MAX = 7           # Velocidad maxima (agresivo al maximo)
 EMOTION_LERP_FACTOR = 0.02 # Interpolacion por frame: ~2-3 s de transicion
+AI_RALLY_PRESS_THRESHOLD = 200           # A partir del golpe 201 presiona
+AI_RALLY_PRESS_STEP = 3                  # Avance lateral por golpe extra
 
 # --- Deteccion de inactividad del jugador ---
 # El juego vigila si el jugador deja la raqueta quieta y explota el rally
@@ -84,3 +95,6 @@ MATCH_SETS_TO_WIN = 1      # Sets necesarios para ganar el partido
 # VELOCIDAD DEL JUEGO
 # ============================================================
 FPS = 60                   # Frames por segundo del bucle principal
+
+# Modo agente (secreto) — velocidad reducida para control por LLM
+AGENT_MODE_SPEED_MULTIPLIER = 0.05  # 5% de velocidad normal

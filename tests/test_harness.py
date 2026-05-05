@@ -103,7 +103,7 @@ class TestHarnessScreenshot(unittest.TestCase):
             h.step(1)
             frame = h.capture_frame()
             self.assertIsInstance(frame, pygame.Surface)
-            self.assertEqual(frame.get_size(), (800, 744))
+            self.assertEqual(frame.get_size(), (800, 766))
 
     def test_save_screenshot(self) -> None:
         with GameHarness.create() as h:

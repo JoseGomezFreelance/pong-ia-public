@@ -11,6 +11,8 @@ import random
 from typing import TYPE_CHECKING
 
 from pong.config.gameplay import (
+    AI_RALLY_PRESS_STEP,
+    AI_RALLY_PRESS_THRESHOLD,
     AI_REACTION_ZONE,
     AI_SPEED,
     AI_SPEED_MAX,
@@ -21,10 +23,12 @@ from pong.config.gameplay import (
     RALLY_IDLE_THRESHOLD,
 )
 from pong.config.layout import GAME_AREA_HEIGHT
+from pong.config.layout import WINDOW_WIDTH
 
 if TYPE_CHECKING:
     from pong.emotional_state import EmotionalState
     from pong.entities import Ball, Paddle
+    from pong.game_state import MatchState
     from pong.question_system import QuestionSystem
 
 
@@ -34,13 +38,14 @@ class GameAIMixin:
     # -- Atributos declarados en Game, visibles aquí para mypy --
     _player_positions: list[int]
     _player_idle_score: float
-    rally_hits: int
+    match: MatchState
     questions: QuestionSystem
     emotional_target: EmotionalState
     emotional_state: EmotionalState
     emotion_active: bool
     ball: Ball
     computer: Paddle
+    computer_home_x: int
 
     def _log(self, category: str, message: str) -> None:
         raise NotImplementedError  # Provided by Game
@@ -69,7 +74,7 @@ class GameAIMixin:
         """Ajusta la emoción autónomamente ante inactividad o exploit."""
         idle_score = self._compute_idle_score()
         self._player_idle_score = idle_score
-        rally = self.rally_hits
+        rally = self.match.rally_hits
 
         # Monotonía de respuestas (todas iguales: Duda, Sí o No)
         recent_answers = [e.answer for e in self.questions.dialogue_history[-3:]]
@@ -138,6 +143,12 @@ class GameAIMixin:
             speed_multiplier: Multiplicador de velocidad (1.0 = normal,
                               <1.0 = bullet time).
         """
+        post_200_hits = max(0, self.match.rally_hits - AI_RALLY_PRESS_THRESHOLD)
+        self.computer.rect.x = max(
+            WINDOW_WIDTH // 2,
+            self.computer_home_x - post_200_hits * AI_RALLY_PRESS_STEP,
+        )
+
         # --- 1. Target base (igual que siempre) ---
         if self.ball.speed_x > 0:
             target_y = self.ball.rect.centery
@@ -153,11 +164,13 @@ class GameAIMixin:
 
         # --- 2. Predicción de trayectoria (agresividad > 0.6) ---
         if emo.aggressiveness > 0.6 and self.ball.speed_x > 0:
+            effective_speed_x = self.ball.get_effective_speed_x(speed_multiplier)
+            effective_speed_y = self.ball.get_effective_speed_y(speed_multiplier)
             frames_to_reach = abs(
                 (self.computer.rect.centerx - self.ball.rect.centerx)
-                / max(abs(self.ball.speed_x), 1)
+                / max(abs(effective_speed_x), 1.0)
             )
-            predicted_y = self.ball.rect.centery + self.ball.speed_y * frames_to_reach
+            predicted_y = self.ball.rect.centery + effective_speed_y * frames_to_reach
             predicted_y = max(0, min(GAME_AREA_HEIGHT, predicted_y))
             blend = (emo.aggressiveness - 0.6) / 0.4
             target_y = int(target_y + (predicted_y - target_y) * blend)
@@ -168,7 +181,7 @@ class GameAIMixin:
             offset = PADDLE_HEIGHT * 0.35 * edge_blend
             if abs(self.ball.speed_y) < 1.0:
                 # Pelota casi recta (exploit): alternar dirección cada golpe
-                offset *= 1 if self.rally_hits % 2 == 0 else -1
+                offset *= 1 if self.match.rally_hits % 2 == 0 else -1
             elif self.ball.speed_y > 0:
                 pass  # offset positivo (golpear con borde inferior)
             else:

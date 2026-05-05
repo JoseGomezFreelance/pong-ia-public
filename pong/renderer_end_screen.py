@@ -95,6 +95,12 @@ class EndScreenMixin:
                    font: pygame.font.Font | None = None) -> list[str]:
         raise NotImplementedError  # Provided by Renderer
 
+    def _draw_skills_button(self, x: int, y: int, hovered: bool) -> None:
+        pass  # Overridden by RPGRendererMixin
+
+    def _draw_ascension_button(self, x: int, y: int, hovered: bool) -> None:
+        pass  # Overridden by RPGRendererMixin
+
     def _build_copy_button_rect(self) -> pygame.Rect:
         """
         Calcula el rectangulo fijo del boton "copiar" en pantalla final.
@@ -148,7 +154,8 @@ class EndScreenMixin:
                         colors: ThemeColors | None = None,
                         records: dict[str, Any] | None = None,
                         new_records: list[str] | None = None,
-                        achievements: AchievementEngine | None = None) -> None:
+                        achievements: AchievementEngine | None = None,
+                        rpg: object | None = None) -> None:
         """
         Dibuja la pantalla final con resumen, records y logros.
 
@@ -221,6 +228,62 @@ class EndScreenMixin:
 
         # --- Resumen de logros ---
         y = self._draw_achievements_summary(y, achievements, colors, mouse_pos)
+
+        # --- Fila de botones: Ranking (+ Habilidades si RPG) ---
+        from pong.config.ui_leaderboard import (
+            END_SCREEN_RANKING_BUTTON_HEIGHT,
+            END_SCREEN_RANKING_BUTTON_WIDTH,
+        )
+        from pong.config.ui_rpg import (
+            END_SCREEN_SKILLS_BUTTON_WIDTH,
+            END_SCREEN_SKILLS_BUTTON_HEIGHT,
+        )
+        rpg_unlocked = rpg is not None and hasattr(rpg, 'rpg_unlocked') and rpg.rpg_unlocked
+
+        # Boton "Habilidades" (magenta) a la derecha — solo si RPG
+        if rpg_unlocked:
+            btn_x = WINDOW_WIDTH - END_SCREEN_SKILLS_BUTTON_WIDTH - 20
+            skills_rect = getattr(self, 'skills_button_rect', None)
+            skills_hover = bool(
+                mouse_pos and skills_rect is not None
+                and skills_rect.collidepoint(mouse_pos)
+            )
+            self._draw_skills_button(btn_x, y, skills_hover)
+
+        # Boton "Ranking" (azul) a la izquierda de Habilidades
+        if rpg_unlocked:
+            ranking_btn_x = (
+                WINDOW_WIDTH - END_SCREEN_SKILLS_BUTTON_WIDTH - 20
+                - END_SCREEN_RANKING_BUTTON_WIDTH - 8
+            )
+        else:
+            ranking_btn_x = WINDOW_WIDTH - END_SCREEN_RANKING_BUTTON_WIDTH - 20
+        ranking_rect = getattr(self, 'ranking_button_rect', None)
+        ranking_hover = bool(
+            mouse_pos and ranking_rect is not None
+            and ranking_rect.collidepoint(mouse_pos)
+        )
+        self._draw_ranking_button(ranking_btn_x, y, ranking_hover)  # type: ignore[attr-defined]
+
+        # Avanzar Y una sola vez por la fila
+        row_h = max(END_SCREEN_RANKING_BUTTON_HEIGHT, END_SCREEN_SKILLS_BUTTON_HEIGHT)
+        y += row_h + 6
+
+        # --- Boton "Ascender" (dorado) - solo si RPG y puede ascender ---
+        if rpg_unlocked:
+            from pong.config.ui_rpg import (
+                END_SCREEN_ASCENSION_BUTTON_HEIGHT,
+                END_SCREEN_ASCENSION_BUTTON_WIDTH,
+            )
+            # Boton "Ascender" (dorado) - solo si puede ascender
+            if hasattr(rpg, 'can_ascend') and rpg.can_ascend():
+                asc_rect = getattr(self, 'ascension_button_rect', None)
+                asc_hover = bool(
+                    mouse_pos and asc_rect is not None
+                    and asc_rect.collidepoint(mouse_pos)
+                )
+                self._draw_ascension_button(btn_x, y, asc_hover)
+                y += END_SCREEN_ASCENSION_BUTTON_HEIGHT + 6
 
         # --- Resumen del partido ---
         final_score = (

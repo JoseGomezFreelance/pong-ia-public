@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 import zipfile
@@ -24,13 +25,22 @@ def get_version() -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Crea ZIP de PongIA para itch.io")
+    parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="Nombre del ZIP sin extension (ej: PongIA_0.07-hotfix1). "
+             "Si se omite, usa PongIA_<version> automaticamente.",
+    )
+    args = parser.parse_args()
+
     if not EXE_PATH.exists():
         print(f"ERROR: No se encuentra {EXE_PATH}")
         print("Ejecuta primero: python scripts/build_with_pyinstaller.py")
         return 1
 
-    version = get_version()
-    zip_name = f"PongIA_{version}.zip"
+    zip_name = f"{args.name}.zip" if args.name else f"PongIA_{get_version()}.zip"
     zip_path = DIST_DIR / zip_name
 
     print(f"=== Creando ZIP: {zip_name} ===")

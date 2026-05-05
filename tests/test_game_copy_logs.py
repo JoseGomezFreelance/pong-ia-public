@@ -4,9 +4,11 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
+from pong.achievements import AchievementEngine
 from pong.config.gameplay import PADDLE_HEIGHT
 from pong.config.layout import GAME_AREA_HEIGHT
 from pong.game import Game
+from pong.game_state import MatchState, UIState
 
 
 class GameCopyLogsTests(unittest.TestCase):
@@ -94,12 +96,15 @@ class GameCopyLogsTests(unittest.TestCase):
                 self.notification_start = value
 
         game = Game.__new__(Game)
-        game.showing_end_screen = True
+        game.ui = UIState(
+            showing_end_screen=True,
+            end_screen_scroll=5,
+            copy_status_text="ok",
+            copy_status_expires_at=99.0,
+        )
+        game.match = MatchState()
         game.game_saved = False
         game.paused = True
-        game.end_screen_scroll = 5
-        game.copy_status_text = "ok"
-        game.copy_status_expires_at = 99.0
         game.new_records = ["max_rally"]
         game.player = _PaddleStub(10)  # type: ignore[assignment]
         game.computer = _PaddleStub(30)  # type: ignore[assignment]
@@ -117,16 +122,15 @@ class GameCopyLogsTests(unittest.TestCase):
         game._restart_match()
 
         self.assertEqual(1, game._save_game_calls)  # type: ignore[attr-defined]
-        self.assertFalse(game.showing_end_screen)
+        self.assertFalse(game.ui.showing_end_screen)
         self.assertFalse(game.paused)
-        self.assertEqual(0, game.end_screen_scroll)
-        self.assertEqual("", game.copy_status_text)
+        self.assertEqual(0, game.ui.end_screen_scroll)
+        self.assertEqual("", game.ui.copy_status_text)
         self.assertEqual([], game.new_records)
         self.assertTrue(game.ball.reset_called)  # type: ignore[attr-defined]
         self.assertTrue(game.narration.reset_called)  # type: ignore[attr-defined]
-        self.assertEqual(1, game.achievements.started)  # type: ignore[attr-defined]
-        self.assertEqual([], game.achievements.pending_notifications)
-        self.assertIsNone(game.achievements.notification_start)  # type: ignore[attr-defined]
+        # _prepare_match() creates a fresh AchievementEngine and calls start_match()
+        self.assertIsInstance(game.achievements, AchievementEngine)
         self.assertTrue(game.narration.reformulations)  # type: ignore[attr-defined]
         self.assertTrue(game.narration.requests)  # type: ignore[attr-defined]
         self.assertTrue(game.narration.requests[-1][2])  # type: ignore[attr-defined]

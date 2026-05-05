@@ -6,6 +6,9 @@ import unittest
 import pygame
 
 from pong.config.gameplay import (
+    BALL_RALLY_MAX_SPEED_MULTIPLIER,
+    BALL_RALLY_SPEEDUP_STEP,
+    BALL_RALLY_SPEEDUP_THRESHOLD,
     BALL_SIZE,
     BALL_SPEED_X,
     BALL_SPEED_Y,
@@ -129,6 +132,32 @@ class TestBallReset(unittest.TestCase):
         # Con 20 resets, deberiamos ver al menos 2 combinaciones distintas
         self.assertGreater(len(directions), 1)
 
+    def test_reset_restores_rally_multiplier(self) -> None:
+        b = Ball()
+        b.sync_rally_speed(BALL_RALLY_SPEEDUP_THRESHOLD + 25)
+        b.reset()
+        self.assertEqual(b.rally_speed_multiplier, 1.0)
+
+
+class TestBallRallySpeed(unittest.TestCase):
+
+    def test_rally_multiplier_stays_at_one_until_threshold(self) -> None:
+        b = Ball()
+        b.sync_rally_speed(BALL_RALLY_SPEEDUP_THRESHOLD)
+        self.assertEqual(b.rally_speed_multiplier, 1.0)
+
+    def test_rally_multiplier_increases_after_threshold(self) -> None:
+        b = Ball()
+        extra_hits = 5
+        b.sync_rally_speed(BALL_RALLY_SPEEDUP_THRESHOLD + extra_hits)
+        expected = 1.0 + extra_hits * BALL_RALLY_SPEEDUP_STEP
+        self.assertAlmostEqual(b.rally_speed_multiplier, expected)
+
+    def test_rally_multiplier_caps_at_maximum(self) -> None:
+        b = Ball()
+        b.sync_rally_speed(BALL_RALLY_SPEEDUP_THRESHOLD + 999)
+        self.assertEqual(b.rally_speed_multiplier, BALL_RALLY_MAX_SPEED_MULTIPLIER)
+
 
 class TestBallUpdate(unittest.TestCase):
 
@@ -167,6 +196,15 @@ class TestBallUpdate(unittest.TestCase):
         b.update(speed_multiplier=0.5)
         moved = b.rect.x - x_before
         self.assertEqual(moved, round(BALL_SPEED_X * 0.5))
+
+    def test_rally_multiplier_increases_movement(self) -> None:
+        b = Ball()
+        b.speed_x = BALL_SPEED_X
+        b.speed_y = 0
+        b.sync_rally_speed(BALL_RALLY_SPEEDUP_THRESHOLD + 20)
+        x_before = b.rect.x
+        b.update()
+        self.assertEqual(b.rect.x - x_before, 6)
 
 
 class TestBallPaddleCollision(unittest.TestCase):

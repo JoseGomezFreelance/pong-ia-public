@@ -2,7 +2,7 @@
 ; create_installer_win.iss -- Genera PongIA_Setup.exe con Inno Setup 6
 ; =============================================================================
 ; Uso:
-;   iscc /DAppVersion="Alfa 0.07" scripts\create_installer_win.iss
+;   iscc /DAppVersion="Beta 0.10" scripts\create_installer_win.iss
 ;
 ; Requisitos:
 ;   - dist\PongIA.exe debe existir (ejecutar antes build_with_pyinstaller.py)
@@ -27,8 +27,7 @@ DefaultDirName={autopf}\PongIA
 DefaultGroupName=PongIA
 OutputDir=..\dist
 OutputBaseFilename=PongIA_Setup
-; TODO: descomentar cuando se cree assets\images\icon.ico
-; SetupIconFile=..\assets\images\icon.ico
+SetupIconFile=..\assets\images\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

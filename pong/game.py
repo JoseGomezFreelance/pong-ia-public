@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 import pygame
 
 from pong.config.gameplay import (
+    AGENT_MODE_SPEED_MULTIPLIER,
     EMOTION_LERP_FACTOR,
     FPS,
     GAME_POINTS_TO_WIN,
@@ -52,16 +53,19 @@ from pong.perf import PerformanceMetrics
 from pong.game_ai import GameAIMixin
 from pong.game_imagegen import GameImagegenMixin
 from pong.game_persistence import GamePersistenceMixin
-from pong.narration_bridge import NarrationBridge
+from pong.game_rpg import GameRPGMixin
+from pong.game_state import MatchState, UIState, create_subsystems
 from pong.question_system import QuestionSystem
 from pong.renderer import Renderer
 from pong.save_manager import (
-    load_history, save_session, open_saves_folder, compute_derived_stats,
+    _write_history,
+    compute_derived_stats,
+    get_player_profile,
+    load_history,
+    open_saves_folder,
 )
-from pong.scoring import ScoreState, apply_point
-from pong.music import MusicEngine
+from pong.scoring import apply_point
 from pong.splash import ZXTerminal, ZXTitleScreen
-from pong.sound import RetroSoundManager
 from pong.theme import ThemeManager
 
 from pong.protocols import (
@@ -75,7 +79,7 @@ if TYPE_CHECKING:
     from pong.image_generator import ImageGenerator
 
 
-class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
+class Game(GameAIMixin, GameRPGMixin, GamePersistenceMixin, GameImagegenMixin):
     """
     Clase principal que controla todo el juego.
 
@@ -90,43 +94,38 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         """
         Inicializa pygame y todos los componentes del juego.
 
-        Muestra una pantalla de carga en la ventana mientras se inicializan
-        los componentes, para que el usuario vea el progreso en vez de una
-        ventana negra congelada.
-
         Args:
             headless_config: Si se pasa un HeadlessConfig, el juego arranca
                 en modo headless (sin ventana, sin audio, subsistemas
                 opcionales desactivados). Usado por GameHarness para testing.
-
-        Orden de creacion:
-        1. Ventana, reloj y fuentes de carga.
-        2. Entidades del juego (paletas, pelota).
-        3. Sistema de marcador.
-        4. Sistema de sonido.
-        5. Motor musical MIDI.
-        6. Renderer (dibujado) y tema de colores.
-        7. Narrador IA (paso mas lento: carga modelo LLM).
-        8. Sistema de preguntas, guardado y narracion inicial.
         """
         self._headless: HeadlessConfig | None = headless_config
+        _hl = self._headless
 
         # --- Pygame ---
         pygame.init()
         self.screen: pygame.Surface = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption(f"Pong \u2014 {APP_VERSION}")
+        # Icono de la ventana
+        try:
+            from pathlib import Path as _P
+            _img_dir = _P(__file__).resolve().parent.parent / "assets" / "images"
+            for _ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+                _icon = _img_dir / f"icon{_ext}"
+                if _icon.exists():
+                    pygame.display.set_icon(pygame.image.load(str(_icon)))
+                    break
+        except Exception:
+            pass
         self.clock: pygame.time.Clock = pygame.time.Clock()
 
-        # --- Estado del juego (antes del terminal para calcular total_steps) ---
+        # --- Estado agrupado ---
         self.running: bool = True
         self.paused: bool = False
-        self.showing_end_screen: bool = False
-        self.showing_achievements_screen: bool = False
-        self.showing_debug_screen: bool = False
-        self._cached_stats_data: dict[str, Any] | None = None
-        self.end_screen_scroll: int = 0
-        self.achievements_screen_scroll: int = 0
-        self.debug_screen_scroll: int = 0
+        self.agent_mode: bool = False
+        self._speed_mult: float = 1.0
+        self.match: MatchState = MatchState()
+        self.ui: UIState = UIState()
         self.perf: PerformanceMetrics = PerformanceMetrics()
         self.game_start_time: float = time.monotonic()
         self.game_end_time: float | None = None
@@ -134,90 +133,22 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         self.match_summary_requested: bool = False
         self.match_summary_start_time: float | None = None
         self._displayed_summary_progress: float = 0.0
-        self.copy_status_text: str = ""
-        self.copy_status_expires_at: float = 0.0
+        self._cached_stats_data: dict[str, Any] | None = None
+        self._player_profile: dict[str, str] = get_player_profile(load_history())
+        self._leaderboard_entries: dict[str, list[Any]] = {}
+        self._peer_network: Any = None  # PeerNetwork | None (lazy import)
+        self._leaderboard_last_refresh: float = 0
+        self._p2p_last_backup_digest: str = ""
         self.terminal_log_lines: list[str] = []
-
-        # --- Fase visual generativa ---
-        _history: dict[str, Any] = load_history()
-        # Comprobar desbloqueo retroactivo por tiempo acumulado
-        from pong.save_manager import check_phase_unlocks, _write_history
-        _newly = check_phase_unlocks(_history)
-        if _newly:
-            _write_history(_history)
-        self.imagegen_unlocked: bool = "imagegen" in _history.get("phases_unlocked", {})
-        self.imagegen_active: bool = False
-        self._imagegen: ImageGenerator | None = None      # Lazy: solo se crea si esta desbloqueada
-        self._last_imagegen_time: float = 0.0
-
-        # --- Inicializacion con/sin terminal de carga ---
-        _hl = self._headless  # atajo: None = modo normal
-
-        if _hl is None or not _hl.skip_splash:
-            # --- Terminal de carga ZX Spectrum ---
-            terminal = ZXTerminal(self.screen)
-            terminal.play_boot_beep()
-            total_steps = 9 if self.imagegen_unlocked else 8
-            terminal.add_line("Inicializando motor de juego...")
-            terminal.render(0, total_steps)
-        else:
-            terminal = None
 
         # --- Entidades ---
         player_x = PADDLE_MARGIN
         computer_x = WINDOW_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH
         center_y = GAME_AREA_HEIGHT // 2 - PADDLE_HEIGHT // 2
-
         self.player: Paddle = Paddle(player_x, center_y)
         self.computer: Paddle = Paddle(computer_x, center_y)
+        self.computer_home_x: int = computer_x
         self.ball: Ball = Ball()
-
-        # --- Marcador ---
-        self.score: ScoreState = ScoreState()
-        self.last_play: str = "Saque inicial"
-        self.rally_hits: int = 0
-        self.max_rally_hits: int = 0
-        self.score_timeline: list[dict[str, Any]] = []
-
-        if terminal:
-            terminal.update_last_line("Motor de juego inicializado")
-            terminal.add_line("Entidades y marcador listos")
-            terminal.render(1, total_steps)
-
-        # --- Sonido ---
-        self.sounds: SoundManagerProtocol
-        if _hl is None or _hl.enable_sound:
-            if terminal:
-                terminal.add_line("Generando efectos de sonido...")
-                terminal.render(2, total_steps)
-            self.sounds = RetroSoundManager()
-            if terminal:
-                terminal.update_last_line("Efectos de sonido listos")
-                terminal.render(3, total_steps)
-        else:
-            from pong.harness import _NullSoundManager
-            self.sounds = _NullSoundManager()
-
-        # --- Musica (tema MIDI sintetizado con ondas cuadradas ZX Spectrum) ---
-        self.music: MusicEngineProtocol
-        if _hl is None or _hl.enable_music:
-            if terminal:
-                terminal.add_line("Cargando tema musical MIDI...")
-                terminal.render(3, total_steps)
-            self.music = MusicEngine()
-            if terminal:
-                music_status = "tema cargado" if self.music.loaded else "no disponible"
-                terminal.update_last_line(f"Musica: {music_status}")
-                terminal.render(4, total_steps)
-        else:
-            from pong.harness import _NullMusicEngine
-            self.music = _NullMusicEngine()
-
-        # --- Dibujado ---
-        self.renderer: Renderer = Renderer(self.screen)
-
-        # --- Tema de colores dinamico (ZX Spectrum) ---
-        self.theme: ThemeManager = ThemeManager()
 
         # --- Estado emocional de la IA ---
         self.emotional_state: EmotionalState = EmotionalState()
@@ -229,72 +160,73 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         self._player_sample_counter: int = 0
         self._player_idle_score: float = 0.0
 
-        # --- Narrador IA ---
-        self.narration: NarrationBridgeProtocol
-        if _hl is None or _hl.enable_narration:
-            if terminal:
-                terminal.add_line("Cargando narrador IA...")
-                terminal.render(5, total_steps)
-            self.narration = NarrationBridge()
-            self.narration.set_perf(self.perf)
-            if terminal:
-                terminal.update_last_line(
-                    f"Narrador: {self.narration.narrator.status_message}"
-                )
-                terminal.render(6, total_steps)
-            self.narration.start(log_fn=self._log)
+        # --- Renderer y tema ---
+        self.renderer: Renderer = Renderer(self.screen)
+        self.theme: ThemeManager = ThemeManager()
+
+        # --- Terminal de carga (si no es headless) ---
+        if _hl is None or not _hl.skip_splash:
+            terminal = ZXTerminal(self.screen)
+            terminal.play_boot_beep()
         else:
-            from pong.harness import _NullNarrationBridge
-            self.narration = _NullNarrationBridge()
+            terminal = None
 
-        # --- Descarga del modelo de difusion (si la fase esta desbloqueada) ---
-        if _hl is None or _hl.enable_imagegen:
+        # --- Fase visual generativa ---
+        self._init_imagegen_phase(terminal)
+
+        total_steps = (9 if self.imagegen_unlocked else 8) if terminal else 0
+
+        if terminal:
+            terminal.add_line("Inicializando motor de juego...")
+            terminal.render(0, total_steps)
+            terminal.update_last_line("Motor de juego inicializado")
+            terminal.add_line("Entidades y marcador listos")
+            terminal.render(1, total_steps)
+
+        # --- Subsistemas (sonido, musica, narracion) ---
+        _step = [2]  # mutable para el closure
+
+        def _progress(msg: str) -> None:
+            if terminal:
+                terminal.add_line(msg) if _step[0] in (2, 3, 5) else terminal.update_last_line(msg)
+                terminal.render(_step[0], total_steps)
+                _step[0] += 1
+
+        self.sounds: SoundManagerProtocol
+        self.music: MusicEngineProtocol
+        self.narration: NarrationBridgeProtocol
+        self.sounds, self.music, self.narration = create_subsystems(
+            _hl, self.perf, self._log,
+            progress_fn=_progress if terminal else None,
+        )
+
+        # --- Descarga del modelo de difusion (si desbloqueado) ---
+        if (_hl is None or _hl.enable_imagegen) and self.imagegen_unlocked:
+            from pong.image_generator import is_model_cached, ensure_models_downloaded
+
             _next_step = 7
-            if self.imagegen_unlocked:
-                from pong.image_generator import is_model_cached, ensure_models_downloaded
+            if not is_model_cached():
+                if terminal:
+                    terminal.add_line("Descargando modelo de difusion...")
+                    terminal.render(_next_step, total_steps)
 
-                if not is_model_cached():
+                def _dl_progress(msg: str) -> None:
                     if terminal:
-                        terminal.add_line("Descargando modelo de difusion...")
+                        terminal.update_last_line(msg)
                         terminal.render(_next_step, total_steps)
 
-                    def _dl_progress(msg: str) -> None:
-                        if terminal:
-                            terminal.update_last_line(msg)
-                            terminal.render(_next_step, total_steps)
+                ensure_models_downloaded(progress_callback=_dl_progress)
+            else:
+                if terminal:
+                    terminal.add_line("Modelo de difusion: en cache")
+                    terminal.render(_next_step, total_steps)
 
-                    ensure_models_downloaded(progress_callback=_dl_progress)
-                else:
-                    if terminal:
-                        terminal.add_line("Modelo de difusion: en cache")
-                        terminal.render(_next_step, total_steps)
-
-        # --- Sistema de preguntas ---
+        # --- Preparar partida (preguntas, logros, narracion inicial) ---
         if terminal:
             terminal.add_line("Preparando partida...")
             terminal.render(7 if not self.imagegen_unlocked else 8, total_steps)
-        self.questions: QuestionSystem = QuestionSystem(self.game_start_time)
-        self.narration.request_reformulation(
-            self.questions.selected_initial_question
-        )
 
-        # --- Sistema de guardado ---
-        history: dict[str, Any] = load_history()
-        self.records: dict[str, Any] = history.get("records", {})
-        self.new_records: list[str] = []
-        self.game_saved: bool = False
-
-        # --- Sistema de logros ---
-        self.achievements: AchievementEngine = AchievementEngine()
-        self.achievements.load_from_history(history)
-        self.achievements.start_match()
-
-        # Pedir narracion de inicio
-        game_state = self.narration.build_game_state(
-            "inicio", self.score, self.ball, self.rally_hits,
-            self.last_play, 0.0,
-        )
-        self.narration.request("inicio", game_state, priority=True)
+        self._prepare_match()
 
         if terminal:
             terminal.add_line(
@@ -308,37 +240,70 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
 
         # --- Portada pixel art ZX Spectrum ---
         if _hl is None or not _hl.skip_splash:
-            title_screen = ZXTitleScreen(self.screen)
+            # Aviso one-time sobre integridad del guardado
+            _pre_history = load_history()
+            _show_notice = not _pre_history.get("_integrity_notice_shown", False)
+            if _show_notice:
+                _pre_history["_integrity_notice_shown"] = True
+                _write_history(_pre_history)
+
+            title_screen = ZXTitleScreen(
+                self.screen, show_integrity_notice=_show_notice,
+            )
             title_screen.build()
             while True:
                 choice = title_screen.display()
                 if choice == "play":
+                    break
+                if choice == "play_agent":
+                    self.agent_mode = True
                     break
                 if choice == "install":
                     from pong.splash import ZXDownloadScreen
 
                     download_screen = ZXDownloadScreen(self.screen)
                     download_screen.run()
-                    # Vuelve a mostrar la portada tras salir del instalador
+                    self.narration.narrator.reload_llm()
 
         # Resetear el reloj del partido: el tiempo empieza al pulsar JUGAR
         self.game_start_time = time.monotonic()
         self.questions.reset_timers(self.game_start_time)
 
-        # --- Logs de inicializacion (terminal) ---
-        self._emit_terminal_line("=" * 60)
-        self._emit_terminal_line(f"PONG \u2014 {APP_VERSION} \u2014 Log de depuracion")
-        self._emit_terminal_line("=" * 60)
-        self._emit_terminal_line(f"Narrador: {self.narration.narrator.status_message}")
-        self._emit_terminal_line(
-            f"Musica: {'tema cargado' if self.music.loaded else 'no disponible'}"
+        # --- Logs de inicializacion ---
+        self._emit_init_logs()
+
+    # --------------------------------------------------------
+    # Preparacion de partida
+    # --------------------------------------------------------
+
+    def _prepare_match(self) -> None:
+        """
+        Prepara sistemas de preguntas, logros y narracion inicial.
+
+        Se usa tanto en __init__ como indirectamente desde _restart_match().
+        """
+        self.questions: QuestionSystem = QuestionSystem(self.game_start_time)
+        self.narration.request_reformulation(
+            self.questions.selected_initial_question
         )
-        self._emit_terminal_line(
-            f"Formato: {GAME_POINTS_TO_WIN} pts/juego, "
-            f"{SET_GAMES_TO_WIN} juegos/set, "
-            f"{MATCH_SETS_TO_WIN} sets/partido"
+
+        history: dict[str, Any] = load_history()
+        self.records: dict[str, Any] = history.get("records", {})
+        self.new_records: list[str] = []
+        self.game_saved: bool = False
+
+        self.achievements: AchievementEngine = AchievementEngine()
+        self.achievements.load_from_history(history)
+        self.achievements.start_match()
+
+        # --- RPG ---
+        self._init_rpg()
+
+        game_state = self.narration.build_game_state(
+            "inicio", self.match.score, self.ball, self.match.rally_hits,
+            self.match.last_play, 0.0,
         )
-        self._emit_terminal_line("-" * 60)
+        self.narration.request("inicio", game_state, priority=True)
 
     # --------------------------------------------------------
     # Logging
@@ -354,6 +319,22 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         line = str(message)
         self.terminal_log_lines.append(line)
         print(line)
+
+    def _emit_init_logs(self) -> None:
+        """Emite los logs de cabecera tras inicializar todos los sistemas."""
+        self._emit_terminal_line("=" * 60)
+        self._emit_terminal_line(f"PONG \u2014 {APP_VERSION} \u2014 Log de depuracion")
+        self._emit_terminal_line("=" * 60)
+        self._emit_terminal_line(f"Narrador: {self.narration.narrator.status_message}")
+        self._emit_terminal_line(
+            f"Musica: {'tema cargado' if self.music.loaded else 'no disponible'}"
+        )
+        self._emit_terminal_line(
+            f"Formato: {GAME_POINTS_TO_WIN} pts/juego, "
+            f"{SET_GAMES_TO_WIN} juegos/set, "
+            f"{MATCH_SETS_TO_WIN} sets/partido"
+        )
+        self._emit_terminal_line("-" * 60)
 
     def _log(self, category: str, message: str) -> None:
         """
@@ -402,54 +383,195 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
             if event.type == pygame.QUIT:
                 self.running = False
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_p and not self.showing_end_screen:
+                if event.key == pygame.K_p and not self.ui.showing_end_screen:
                     self.paused = not self.paused
                 if event.key == pygame.K_ESCAPE:
-                    if not self.showing_end_screen:
-                        self.showing_end_screen = True
+                    if not self.ui.showing_end_screen:
+                        self.ui.showing_end_screen = True
                         self.game_end_time = time.monotonic()
                         self.music.stop()
                         self._print_end_summary()
                         self._request_match_summary()
-                    elif self.showing_achievements_screen:
-                        self.showing_achievements_screen = False
-                        self.achievements_screen_scroll = 0
-                    elif self.showing_debug_screen:
-                        self.showing_debug_screen = False
-                        self.debug_screen_scroll = 0
+                    elif self.ui.showing_alias_prompt:
+                        self.ui.showing_alias_prompt = False
+                    elif self.ui.showing_p2p_connecting:
+                        self.ui.showing_p2p_connecting = False
+                    elif self.ui.showing_leaderboard_screen:
+                        self.ui.showing_leaderboard_screen = False
+                        self.ui.leaderboard_screen_scroll = 0
+                    elif self.ui.showing_skills_screen:
+                        self.ui.showing_skills_screen = False
+                        self.ui.skills_screen_scroll = 0
+                    elif self.ui.showing_ascension_screen:
+                        # No se puede salir con ESC: la ascension es irreversible
+                        pass
+                    elif self.ui.showing_ascension_confirm:
+                        self.ui.showing_ascension_confirm = False
+                    elif self.ui.showing_achievements_screen:
+                        self.ui.showing_achievements_screen = False
+                        self.ui.achievements_screen_scroll = 0
+                    elif self.ui.showing_debug_screen:
+                        self.ui.showing_debug_screen = False
+                        self.ui.debug_screen_scroll = 0
                     else:
                         self.running = False
-                if self.showing_end_screen and event.key == pygame.K_UP:
-                    if self.showing_achievements_screen:
-                        self.achievements_screen_scroll = max(
-                            0, self.achievements_screen_scroll - 1,
+                # Entrada de texto para alias prompt
+                if self.ui.showing_alias_prompt:
+                    from pong.config.ui_leaderboard import ALIAS_MAX_LENGTH
+                    if event.key == pygame.K_BACKSPACE:
+                        self.ui.alias_input_text = self.ui.alias_input_text[:-1]
+                    elif event.key == pygame.K_RETURN:
+                        if self.ui.alias_input_text.strip():
+                            from pong.save_manager import set_player_alias
+                            self._player_profile = set_player_alias(
+                                self.ui.alias_input_text.strip(),
+                            )
+                            self.ui.showing_alias_prompt = False
+                            self._enter_p2p_connecting()
+                    elif event.unicode and len(self.ui.alias_input_text) < ALIAS_MAX_LENGTH:
+                        ch = event.unicode
+                        if ch.isprintable() and ch not in ('\t', '\n', '\r'):
+                            self.ui.alias_input_text += ch
+
+                if self.ui.showing_end_screen and event.key == pygame.K_UP:
+                    if self.ui.showing_leaderboard_screen:
+                        self.ui.leaderboard_screen_scroll = max(
+                            0, self.ui.leaderboard_screen_scroll - 1,
                         )
-                    elif self.showing_debug_screen:
-                        self.debug_screen_scroll = max(
-                            0, self.debug_screen_scroll - 1,
+                    elif self.ui.showing_skills_screen:
+                        self.ui.skills_screen_scroll = max(
+                            0, self.ui.skills_screen_scroll - 30,
                         )
-                if self.showing_end_screen and event.key == pygame.K_DOWN:
-                    if self.showing_achievements_screen:
-                        self.achievements_screen_scroll += 1
-                    elif self.showing_debug_screen:
-                        self.debug_screen_scroll += 1
+                    elif self.ui.showing_ascension_screen:
+                        self.ui.ascension_screen_scroll = max(
+                            0, self.ui.ascension_screen_scroll - 30,
+                        )
+                    elif self.ui.showing_achievements_screen:
+                        self.ui.achievements_screen_scroll = max(
+                            0, self.ui.achievements_screen_scroll - 1,
+                        )
+                    elif self.ui.showing_debug_screen:
+                        self.ui.debug_screen_scroll = max(
+                            0, self.ui.debug_screen_scroll - 1,
+                        )
+                if self.ui.showing_end_screen and event.key == pygame.K_DOWN:
+                    if self.ui.showing_leaderboard_screen:
+                        self.ui.leaderboard_screen_scroll += 1
+                    elif self.ui.showing_skills_screen:
+                        self.ui.skills_screen_scroll += 30
+                    elif self.ui.showing_ascension_screen:
+                        self.ui.ascension_screen_scroll += 30
+                    elif self.ui.showing_achievements_screen:
+                        self.ui.achievements_screen_scroll += 1
+                    elif self.ui.showing_debug_screen:
+                        self.ui.debug_screen_scroll += 1
             if (
-                self.showing_end_screen
+                self.ui.showing_end_screen
                 and event.type == pygame.MOUSEBUTTONDOWN
                 and event.button == 1
             ):
-                if self.showing_achievements_screen:
+                if self.ui.showing_alias_prompt:
+                    # Click en prompt de alias
+                    if (self.renderer.alias_accept_button_rect
+                            and self.renderer.alias_accept_button_rect.collidepoint(event.pos)
+                            and self.ui.alias_input_text.strip()):
+                        from pong.save_manager import set_player_alias
+                        self._player_profile = set_player_alias(
+                            self.ui.alias_input_text.strip(),
+                        )
+                        self.ui.showing_alias_prompt = False
+                        self._enter_p2p_connecting()
+                elif self.ui.showing_p2p_connecting:
+                    # Click en boton "Continuar" de pantalla P2P
+                    self._handle_p2p_continue_click(event.pos)
+                elif self.ui.showing_leaderboard_screen:
+                    # Click en pantalla de rankings
+                    if (self.renderer.ranking_back_button_rect
+                            and self.renderer.ranking_back_button_rect.collidepoint(event.pos)):
+                        self.ui.showing_leaderboard_screen = False
+                        self.ui.leaderboard_screen_scroll = 0
+                    else:
+                        for i, tab_rect in enumerate(self.renderer.ranking_tab_rects):
+                            if tab_rect.collidepoint(event.pos):
+                                self.ui.leaderboard_active_tab = i
+                                self.ui.leaderboard_screen_scroll = 0
+                                break
+                elif self.ui.showing_skills_screen:
+                    # Click en pantalla de habilidades
+                    if (self.renderer.skills_back_button_rect
+                            and self.renderer.skills_back_button_rect.collidepoint(event.pos)):
+                        self.ui.showing_skills_screen = False
+                        self.ui.skills_screen_scroll = 0
+                    else:
+                        # Comprobar click en botones de compra
+                        for skill_id, buy_rect in self.renderer.skill_buy_rects:
+                            if buy_rect.collidepoint(event.pos):
+                                if self.rpg.buy_skill(skill_id):
+                                    self._log("RPG", f"Habilidad comprada: {skill_id}")
+                                    self._rpg_apply_modifiers()
+                                    self._rpg_persist_now()
+                                break
+                elif self.ui.showing_ascension_screen:
+                    # Click en pantalla de ascension (sin boton volver)
+                    if (self.renderer.ascension_confirm_button_rect
+                          and self.renderer.ascension_confirm_button_rect.collidepoint(event.pos)
+                          and self.rpg.can_ascend()):
+                        self.rpg.perform_ascension()
+                        self._rpg_apply_modifiers()
+                        self._log("RPG", f"Ascension completada! Ascension #{self.rpg.ascension_count}")
+                        self._rpg_persist_now()
+                        self.ui.showing_ascension_screen = False
+                        self.ui.ascension_screen_scroll = 0
+                        # Mostrar pantalla de titulo para subrayar el peso
+                        # de la ascension (el jugador debe pulsar "Jugar")
+                        title_screen = ZXTitleScreen(self.screen)
+                        title_screen.build()
+                        while True:
+                            choice = title_screen.display()
+                            if choice == "play":
+                                break
+                            if choice == "play_agent":
+                                self.agent_mode = True
+                                break
+                            if choice == "install":
+                                from pong.splash import ZXDownloadScreen
+                                download_screen = ZXDownloadScreen(self.screen)
+                                download_screen.run()
+                                self.narration.narrator.reload_llm()
+                        self._restart_match()
+                    else:
+                        # Comprobar click en botones de compra de ascension
+                        for skill_id, buy_rect in self.renderer.ascension_buy_rects:
+                            if buy_rect.collidepoint(event.pos):
+                                if self.rpg.buy_ascension_skill(skill_id):
+                                    self._log("RPG", f"Habilidad de ascension comprada: {skill_id}")
+                                    self._rpg_apply_modifiers()
+                                    self._rpg_persist_now()
+                                break
+                elif self.ui.showing_ascension_confirm:
+                    # Click en dialogo de confirmacion de ascension
+                    # (bloquea todos los clicks del end screen)
+                    if (self.renderer.ascension_dialog_accept_rect
+                            and self.renderer.ascension_dialog_accept_rect.collidepoint(event.pos)):
+                        self.ui.showing_ascension_confirm = False
+                        self.ui.showing_ascension_screen = True
+                        self.ui.ascension_screen_scroll = 0
+                    elif (self.renderer.ascension_dialog_cancel_rect
+                          and self.renderer.ascension_dialog_cancel_rect.collidepoint(event.pos)):
+                        self.ui.showing_ascension_confirm = False
+                    # else: click fuera del dialogo → ignorar
+                elif self.ui.showing_achievements_screen:
                     if self.renderer.achievements_back_button_rect.collidepoint(
                         event.pos,
                     ):
-                        self.showing_achievements_screen = False
-                        self.achievements_screen_scroll = 0
-                elif self.showing_debug_screen:
+                        self.ui.showing_achievements_screen = False
+                        self.ui.achievements_screen_scroll = 0
+                elif self.ui.showing_debug_screen:
                     if self.renderer.debug_back_button_rect.collidepoint(
                         event.pos,
                     ):
-                        self.showing_debug_screen = False
-                        self.debug_screen_scroll = 0
+                        self.ui.showing_debug_screen = False
+                        self.ui.debug_screen_scroll = 0
                 elif self.renderer.copy_button_rect.collidepoint(event.pos):
                     self._copy_terminal_logs()
                 elif self.renderer.restart_button_rect.collidepoint(event.pos):
@@ -459,25 +581,42 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                 elif (self.renderer.logros_button_rect
                       and self.renderer.logros_button_rect.collidepoint(
                           event.pos)):
-                    self.showing_achievements_screen = True
-                    self.achievements_screen_scroll = 0
+                    self.ui.showing_achievements_screen = True
+                    self.ui.achievements_screen_scroll = 0
                     self._cached_stats_data = compute_derived_stats(
                         load_history(),
                     )
+                elif (self.renderer.ranking_button_rect
+                      and self.renderer.ranking_button_rect.collidepoint(
+                          event.pos)):
+                    if self._player_profile.get("alias"):
+                        self._enter_p2p_connecting()
+                    else:
+                        self.ui.showing_alias_prompt = True
+                        self.ui.alias_input_text = ""
+                elif (self.renderer.skills_button_rect
+                      and self.renderer.skills_button_rect.collidepoint(
+                          event.pos)):
+                    self.ui.showing_skills_screen = True
+                    self.ui.skills_screen_scroll = 0
+                elif (self.renderer.ascension_button_rect
+                      and self.renderer.ascension_button_rect.collidepoint(
+                          event.pos)):
+                    self.ui.showing_ascension_confirm = True
                 elif (self.renderer.debug_button_rect
                       and self.renderer.debug_button_rect.collidepoint(
                           event.pos)):
-                    self.showing_debug_screen = True
-                    self.debug_screen_scroll = 0
+                    self.ui.showing_debug_screen = True
+                    self.ui.debug_screen_scroll = 0
 
         # Movimiento continuo con teclas mantenidas
-        if self.showing_end_screen:
+        if self.ui.showing_end_screen:
             return
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP]:
-            self.player.move_up()
+            self.player.move_up(self._speed_mult)
         if keys[pygame.K_DOWN]:
-            self.player.move_down()
+            self.player.move_down(self._speed_mult)
 
     # --------------------------------------------------------
     # Logica principal (update)
@@ -517,7 +656,7 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                 self._log("EMOCION", "Sistema emocional activado")
 
         # --- Recoger resumen de partido pendiente ---
-        if self.showing_end_screen and self.match_summary_text is None:
+        if self.ui.showing_end_screen and self.match_summary_text is None:
             pending_summary = self.narration.consume_pending_summary()
             if pending_summary is not None:
                 clean_summary = pending_summary.strip().strip("«»\"'`")
@@ -531,10 +670,10 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                 self._save_game()
 
         if (
-            self.copy_status_text
-            and time.monotonic() >= self.copy_status_expires_at
+            self.ui.copy_status_text
+            and time.monotonic() >= self.ui.copy_status_expires_at
         ):
-            self.copy_status_text = ""
+            self.ui.copy_status_text = ""
 
         # --- Actualizar tema de colores (antes del early return para que
         #     la pantalla final tambien tenga colores emocionales) ---
@@ -566,7 +705,7 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         if (
             self.imagegen_unlocked
             and elapsed >= IMAGEGEN_MATCH_ACTIVATE_SECONDS
-            and not self.showing_end_screen
+            and not self.ui.showing_end_screen
         ):
             if not self.imagegen_active:
                 self._activate_imagegen()
@@ -612,8 +751,11 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
             ):
                 self.achievements.advance_notification()
 
-        if self.showing_end_screen or self.paused:
+        if self.ui.showing_end_screen or self.paused:
             return
+
+        # --- RPG: acumular XP por tiempo de juego ---
+        self._rpg_update(1.0 / FPS)
 
         # --- Muestrear posicion del jugador (4 Hz) ---
         self._player_sample_counter += 1
@@ -649,6 +791,9 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
 
         # --- Obtener multiplicador de velocidad ---
         speed_mult = self.questions.get_speed_multiplier()
+        if self.agent_mode:
+            speed_mult = min(speed_mult, AGENT_MODE_SPEED_MULTIPLIER)
+        self._speed_mult = speed_mult
 
         # --- Interpolar estado emocional suavemente ---
         if self.emotion_active:
@@ -675,18 +820,20 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
 
         if player_collision or computer_collision:
             self.sounds.play_paddle_hit()
-            self.rally_hits += 1
-            if self.rally_hits > self.max_rally_hits:
-                self.max_rally_hits = self.rally_hits
+            self.match.rally_hits += 1
+            if self.match.rally_hits > self.match.max_rally_hits:
+                self.match.max_rally_hits = self.match.rally_hits
+            self.ball.sync_rally_speed(self.match.rally_hits)
             if player_collision:
-                self.last_play = "El jugador devolvió la pelota"
-                self._log("RALLY", f"Jugador devolvio (#{self.rally_hits} en rally)")
+                self.match.last_play = "El jugador devolvió la pelota"
+                self._log("RALLY", f"Jugador devolvio (#{self.match.rally_hits} en rally)")
+                self._rpg_on_player_collision()
             else:
-                self.last_play = "El ordenador devolvió la pelota"
-                self._log("RALLY", f"Ordenador devolvio (#{self.rally_hits} en rally)")
+                self.match.last_play = "El ordenador devolvió la pelota"
+                self._log("RALLY", f"Ordenador devolvio (#{self.match.rally_hits} en rally)")
             # Comprobar logros de rally inmediatamente tras cada golpe
             self._notify_achievements(
-                self.achievements.check_rally(self.rally_hits, self.max_rally_hits)
+                self.achievements.check_rally(self.match.rally_hits, self.match.max_rally_hits)
             )
 
         # --- Comprobar si alguien anoto ---
@@ -697,23 +844,25 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
             point_scored = True
             self._handle_point("computer")
             self.ball.reset()
-            self.rally_hits = 0
+            self.match.rally_hits = 0
+            self.computer.rect.x = self.computer_home_x
         elif self.ball.rect.right >= WINDOW_WIDTH:
             # La pelota salio por la derecha: punto para el jugador
             point_scored = True
             self._handle_point("player")
             self.ball.reset()
-            self.rally_hits = 0
+            self.match.rally_hits = 0
+            self.computer.rect.x = self.computer_home_x
 
-        if self.showing_end_screen:
+        if self.ui.showing_end_screen:
             return
 
         # --- Pedir narracion periodica durante rallies ---
         if not point_scored and self.narration.should_request_periodic():
             elapsed = time.monotonic() - self.game_start_time
             game_state = self.narration.build_game_state(
-                "juego en curso", self.score, self.ball, self.rally_hits,
-                self.last_play, elapsed,
+                "juego en curso", self.match.score, self.ball, self.match.rally_hits,
+                self.match.last_play, elapsed,
             )
             game_state["dialogue_essence"] = self.questions.get_dialogue_essence()
             self.narration.request("juego en curso", game_state)
@@ -741,23 +890,23 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         elapsed = time.monotonic() - self.game_start_time
 
         # Snapshot para deteccion de juego perfecto (apply_point resetea puntos)
-        pre_player_pts = self.score.player_points
-        pre_computer_pts = self.score.computer_points
+        pre_player_pts = self.match.score.player_points
+        pre_computer_pts = self.match.score.computer_points
 
         # Track si el computer lidera en juegos del set (para logro de remontada)
-        if self.score.computer_games > self.score.player_games:
+        if self.match.score.computer_games > self.match.score.player_games:
             self.achievements._computer_led_in_set = True
 
         # Aplicar el punto al marcador
-        result = apply_point(self.score, winner)
-        self.last_play = result.last_play
+        result = apply_point(self.match.score, winner)
+        self.match.last_play = result.last_play
 
         # Registrar en timeline
-        self.score_timeline.append(
+        self.match.score_timeline.append(
             {
                 "elapsed_seconds": elapsed,
                 "description": result.last_play,
-                "scoreboard": self.score.scoreboard_text(),
+                "scoreboard": self.match.score.scoreboard_text(),
             }
         )
 
@@ -769,27 +918,30 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         )
         self._log(
             "PUNTO",
-            f"{result.last_play}{streak_info} -> {self.score.scoreboard_text()}",
+            f"{result.last_play}{streak_info} -> {self.match.score.scoreboard_text()}",
         )
 
         if result.game_won:
-            self._log("JUEGO", f"{result.last_play} -> {self.score.scoreboard_text()}")
+            self._log("JUEGO", f"{result.last_play} -> {self.match.score.scoreboard_text()}")
         if result.set_won:
-            self._log("SET", f"{result.last_play} -> {self.score.scoreboard_text()}")
+            self._log("SET", f"{result.last_play} -> {self.match.score.scoreboard_text()}")
         if result.match_won:
             self._log("PARTIDO", f"{result.last_play}!")
-            self.showing_end_screen = True
+            self.ui.showing_end_screen = True
             self.game_end_time = time.monotonic()
             self.music.stop()
             self._shutdown_imagegen()
             self._print_end_summary()
             self._request_match_summary()
 
+        # --- RPG: hook de punto anotado ---
+        self._rpg_on_point_scored(winner)
+
         # --- Comprobar logros en tiempo real ---
         achievement_context = {
-            "rally_hits": self.rally_hits,
-            "max_rally_hits": self.max_rally_hits,
-            "score": self.score,
+            "rally_hits": self.match.rally_hits,
+            "max_rally_hits": self.match.max_rally_hits,
+            "score": self.match.score,
             "point_result": result,
             "pre_player_pts": pre_player_pts,
             "pre_computer_pts": pre_computer_pts,
@@ -812,8 +964,8 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
             "scoring_streak": result.scoring_streak,
         }
         game_state = self.narration.build_game_state(
-            result.event_label, self.score, self.ball, self.rally_hits,
-            self.last_play, elapsed, event_data=event_data,
+            result.event_label, self.match.score, self.ball, self.match.rally_hits,
+            self.match.last_play, elapsed, event_data=event_data,
         )
         game_state["dialogue_essence"] = self.questions.get_dialogue_essence()
         self.narration.request(result.event_label, game_state, priority=True)
@@ -832,8 +984,8 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
         elapsed = time.monotonic() - self.game_start_time
         dialogue_summary = self.questions.get_dialogue_summary()
         game_state = self.narration.build_game_state(
-            "juego en curso", self.score, self.ball, self.rally_hits,
-            self.last_play, elapsed,
+            "juego en curso", self.match.score, self.ball, self.match.rally_hits,
+            self.match.last_play, elapsed,
         )
         game_state["dialogue_turns"] = self.questions.get_recent_dialogue_context()
         game_state["question_count"] = len(self.questions.dialogue_history)
@@ -845,24 +997,86 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
 
     def draw(self) -> None:
         """Dibuja el frame actual (juego normal o pantalla de depuracion)."""
-        if self.showing_end_screen:
-            if self.showing_achievements_screen:
-                self.achievements_screen_scroll = (
+        if self.ui.showing_end_screen:
+            if self.ui.showing_alias_prompt:
+                self.renderer.draw_alias_prompt(
+                    current_text=self.ui.alias_input_text,
+                    mouse_pos=pygame.mouse.get_pos(),
+                )
+            elif self.ui.showing_p2p_connecting:
+                elapsed = time.monotonic() - self.ui.p2p_connect_start_time
+                telemetry = {}
+                if self._peer_network is not None:
+                    telemetry = self._peer_network.get_telemetry()
+                    # Auto-avanzar si se encontraron peers y paso el minimo
+                    from pong.config.ui_leaderboard import P2P_CONNECT_MIN_SECONDS
+                    if (telemetry.get("active_peers", 0) > 0
+                            and elapsed >= P2P_CONNECT_MIN_SECONDS):
+                        self._exit_p2p_connecting()
+                self.renderer.draw_p2p_connecting(
+                    elapsed=elapsed,
+                    telemetry=telemetry,
+                    mouse_pos=pygame.mouse.get_pos(),
+                )
+            elif self.ui.showing_leaderboard_screen:
+                peer_count = 0
+                network_active = False
+                p2p_degraded = False
+                if self._peer_network is not None:
+                    peer_count = self._peer_network.get_peer_count()
+                    network_active = True
+                    p2p_degraded = getattr(
+                        self._peer_network, "_p2p_degraded", False,
+                    )
+                # Refresco periodico (cada 3s) para captar nuevos peers
+                if time.monotonic() - self._leaderboard_last_refresh > 3.0:
+                    self._refresh_leaderboard()
+                validated_date = self._player_profile.get(
+                    "validated_date", "",
+                )
+                self.ui.leaderboard_screen_scroll = (
+                    self.renderer.draw_leaderboard_screen(
+                        entries_by_category=self._leaderboard_entries,
+                        active_tab=self.ui.leaderboard_active_tab,
+                        scroll=self.ui.leaderboard_screen_scroll,
+                        mouse_pos=pygame.mouse.get_pos(),
+                        peer_count=peer_count,
+                        network_active=network_active,
+                        validated_date=validated_date,
+                        p2p_degraded=p2p_degraded,
+                    )
+                )
+            elif self.ui.showing_skills_screen:
+                self.renderer.draw_skills_screen(
+                    rpg=self.rpg,
+                    scroll=self.ui.skills_screen_scroll,
+                    mouse_pos=pygame.mouse.get_pos(),
+                )
+                pygame.display.flip()
+            elif self.ui.showing_ascension_screen:
+                self.renderer.draw_ascension_screen(
+                    rpg=self.rpg,
+                    scroll=self.ui.ascension_screen_scroll,
+                    mouse_pos=pygame.mouse.get_pos(),
+                )
+                pygame.display.flip()
+            elif self.ui.showing_achievements_screen:
+                self.ui.achievements_screen_scroll = (
                     self.renderer.draw_achievements_screen(
                         achievements=self.achievements,
-                        scroll_offset=self.achievements_screen_scroll,
+                        scroll_offset=self.ui.achievements_screen_scroll,
                         mouse_pos=pygame.mouse.get_pos(),
                         colors=self.theme.colors,
                         stats_data=self._cached_stats_data,
                     )
                 )
-            elif self.showing_debug_screen:
-                self.debug_screen_scroll = (
+            elif self.ui.showing_debug_screen:
+                self.ui.debug_screen_scroll = (
                     self.renderer.draw_debug_screen(
-                        score_timeline=self.score_timeline,
+                        score_timeline=self.match.score_timeline,
                         narration_log=self.narration.narration_log,
                         narrator_memory=list(self.narration.narrator.memory),
-                        scroll_offset=self.debug_screen_scroll,
+                        scroll_offset=self.ui.debug_screen_scroll,
                         format_elapsed_fn=self._format_elapsed,
                         mouse_pos=pygame.mouse.get_pos(),
                         colors=self.theme.colors,
@@ -889,18 +1103,25 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                 summary_progress = self._displayed_summary_progress
 
                 self.renderer.draw_end_screen(
-                    score=self.score,
+                    score=self.match.score,
                     elapsed_text=self._format_elapsed(elapsed_total),
                     quit_hint="ESC: salir | Click en 'Jugar otra vez': nuevo partido",
                     summary_text=self.match_summary_text,
                     summary_progress=summary_progress,
-                    copy_status_text=self.copy_status_text,
+                    copy_status_text=self.ui.copy_status_text,
                     mouse_pos=pygame.mouse.get_pos(),
                     colors=self.theme.colors,
                     records=self.records,
                     new_records=self.new_records,
                     achievements=self.achievements,
+                    rpg=self.rpg if hasattr(self, 'rpg') else None,
                 )
+                # Dialogo de confirmacion de ascension (overlay sobre end screen)
+                if self.ui.showing_ascension_confirm:
+                    self.renderer.draw_ascension_confirm_dialog(
+                        mouse_pos=pygame.mouse.get_pos(),
+                    )
+                    pygame.display.flip()
         else:
             # --- Preparar popup de logro si hay notificacion activa ---
             achievement_popup = None
@@ -912,7 +1133,7 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                     achievement_popup = (notif, elapsed_popup)
 
             self.renderer.draw_game(
-                score=self.score,
+                score=self.match.score,
                 player=self.player,
                 computer=self.computer,
                 ball=self.ball,
@@ -925,7 +1146,143 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                 colors=self.theme.colors,
                 paused=self.paused,
                 achievement_popup=achievement_popup,
+                rpg=self.rpg if hasattr(self, 'rpg') else None,
+                extra_balls=self._rpg_extra_balls if hasattr(self, '_rpg_extra_balls') else None,
             )
+
+    # --------------------------------------------------------
+    # Leaderboard / P2P
+    # --------------------------------------------------------
+
+    def _enter_p2p_connecting(self) -> None:
+        """Transiciona a la pantalla de conexion P2P."""
+        self.ui.showing_p2p_connecting = True
+        self.ui.p2p_connect_start_time = time.monotonic()
+        self._start_peer_network()
+
+    def _exit_p2p_connecting(self) -> None:
+        """Sale de la pantalla de conexion y abre el leaderboard."""
+        self.ui.showing_p2p_connecting = False
+        self.ui.showing_leaderboard_screen = True
+        self.ui.leaderboard_screen_scroll = 0
+        self._refresh_leaderboard()
+
+    def _handle_p2p_continue_click(self, pos: tuple[int, int]) -> None:
+        """Maneja click en el boton Continuar de la pantalla de conexion."""
+        from pong.config.ui_leaderboard import P2P_CONNECT_MIN_SECONDS
+        if (self.renderer.p2p_continue_button_rect
+                and self.renderer.p2p_continue_button_rect.collidepoint(pos)):
+            elapsed = time.monotonic() - self.ui.p2p_connect_start_time
+            peer_count = 0
+            if self._peer_network is not None:
+                peer_count = self._peer_network.get_peer_count()
+            if elapsed >= P2P_CONNECT_MIN_SECONDS or peer_count > 0:
+                self._exit_p2p_connecting()
+
+    def _refresh_leaderboard(self) -> None:
+        """Recalcula las entries del leaderboard (local + peers remotos).
+
+        Cuando hay peers activos:
+        - Guarda el sufijo validado y backup de entries en el save.
+        Cuando no hay peers:
+        - Carga el backup del save para mostrar datos historicos.
+        - Usa el sufijo guardado en vez de ``????``.
+        """
+        from pong.leaderboard import (
+            LeaderboardEntry,
+            compute_entries_digest,
+            get_local_entries,
+            merge_entries,
+        )
+        from pong.save_manager import get_p2p_backup, save_p2p_validation
+
+        history = load_history()
+        local = get_local_entries(history, self._player_profile)
+        remote: list[Any] = []
+        peer_count = 0
+        if self._peer_network is not None:
+            remote = self._peer_network.get_peer_entries()
+            peer_count = self._peer_network.get_peer_count()
+
+        saved_suffix = self._player_profile.get("validated_suffix", "")
+
+        remote_digest = compute_entries_digest(remote) if remote else ""
+
+        if peer_count > 0 and remote and remote_digest != self._p2p_last_backup_digest:
+            # Guardar/actualizar validacion y backup cuando hay entries nuevas
+            self._p2p_last_backup_digest = remote_digest
+            all_entries = local + remote
+            alias = self._player_profile.get("alias", "")
+            fp = self._player_profile.get("fingerprint", "")
+            suffix = self._compute_local_suffix(all_entries, alias, fp)
+            backup = [e.to_dict() for e in remote]
+            self._player_profile = save_p2p_validation(suffix, backup)
+            saved_suffix = suffix
+
+        # Si no hay peers activos, cargar backup del save como remotos
+        if peer_count == 0 and not remote:
+            backup_raw = get_p2p_backup(history)
+            for raw in backup_raw:
+                entry = LeaderboardEntry.from_dict(raw)
+                remote.append(entry)
+
+        self._leaderboard_entries = merge_entries(
+            local, remote,
+            p2p_validated=peer_count > 0,
+            saved_suffix=saved_suffix,
+        )
+        self._leaderboard_last_refresh = time.monotonic()
+
+    @staticmethod
+    def _compute_local_suffix(
+        entries: list[Any], alias: str, fingerprint: str,
+    ) -> str:
+        """Calcula el sufijo B64 que le corresponde al jugador local."""
+        from pong.leaderboard import _index_to_b64_suffix
+        # Recoger fingerprints unicos con el mismo alias, ordenar
+        fps = sorted({e.fingerprint for e in entries if e.alias == alias})
+        try:
+            idx = fps.index(fingerprint)
+        except ValueError:
+            idx = 0
+        return _index_to_b64_suffix(idx)
+
+    def _sync_local_records_to_peer_network(self) -> None:
+        """Recalcula y publica los records locales hacia la red P2P activa."""
+        if self._peer_network is None or not self._player_profile.get("alias"):
+            return
+        from pong.leaderboard import get_local_entries
+
+        history = load_history()
+        entries = get_local_entries(history, self._player_profile)
+        self._peer_network.broadcast_records(entries)
+
+    def _start_peer_network(self) -> None:
+        """Arranca la red P2P en background (no bloquea)."""
+        if self._peer_network is not None:
+            return
+        self._p2p_last_backup_digest = ""
+        if not self._player_profile.get("alias"):
+            return
+        try:
+            from pong.p2p import PeerNetwork
+            from pong.save_manager import SAVE_DIR
+
+            self._peer_network = PeerNetwork(
+                profile=self._player_profile,
+                cache_path=SAVE_DIR / "known_peers.json",
+            )
+            # Cargar records ANTES de arrancar hilos (evitar race condition)
+            self._sync_local_records_to_peer_network()
+            self._peer_network.start()
+        except Exception:
+            self._peer_network = None
+
+    def _stop_peer_network(self) -> None:
+        """Detiene la red P2P."""
+        if self._peer_network is not None:
+            self._peer_network.stop()
+            self._peer_network = None
 
     # --------------------------------------------------------
     # Bucle principal
@@ -950,6 +1307,7 @@ class Game(GameAIMixin, GamePersistenceMixin, GameImagegenMixin):
                 self.clock.tick(FPS)
         finally:
             # Limpieza: detener hilos de fondo y cerrar pygame
+            self._stop_peer_network()
             self._shutdown_imagegen()
             self.narration.stop()
             from pathlib import Path

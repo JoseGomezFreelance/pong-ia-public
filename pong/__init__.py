@@ -19,7 +19,16 @@ Para ejecutar el juego:
 """
 
 from pong.config.version import APP_VERSION
-from pong.game import Game
-from pong.harness import GameHarness, HeadlessConfig
 
 __all__ = ["Game", "APP_VERSION", "GameHarness", "HeadlessConfig"]
+
+
+def __getattr__(name: str) -> object:
+    """Lazy import de modulos que dependen de pygame."""
+    if name == "Game":
+        from pong.game import Game
+        return Game
+    if name in ("GameHarness", "HeadlessConfig"):
+        from pong.harness import GameHarness, HeadlessConfig
+        return GameHarness if name == "GameHarness" else HeadlessConfig
+    raise AttributeError(f"module 'pong' has no attribute {name!r}")

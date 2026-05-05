@@ -17,6 +17,9 @@ import pygame
 
 from pong.config.colors import COLOR_FOREGROUND
 from pong.config.gameplay import (
+    BALL_RALLY_MAX_SPEED_MULTIPLIER,
+    BALL_RALLY_SPEEDUP_STEP,
+    BALL_RALLY_SPEEDUP_THRESHOLD,
     BALL_SIZE,
     BALL_SPEED_X,
     BALL_SPEED_Y,
@@ -54,26 +57,33 @@ class Paddle:
         """
         self.rect: pygame.Rect = pygame.Rect(x, y, PADDLE_WIDTH, PADDLE_HEIGHT)
         self.speed: int = PADDLE_SPEED
+        self._frac_y: float = 0.0  # Acumulador fraccionario (modo agente)
 
-    def move_up(self) -> None:
+    def move_up(self, speed_multiplier: float = 1.0) -> None:
         """
         Mueve la paleta hacia arriba.
 
         Resta 'speed' pixeles a la posicion vertical. Si la paleta se saldria
         de la pantalla por arriba, la fija en el borde superior (top = 0).
         """
-        self.rect.y -= self.speed
+        self._frac_y -= self.speed * speed_multiplier
+        dy = int(self._frac_y)
+        self._frac_y -= dy
+        self.rect.y += dy
         if self.rect.top < 0:
             self.rect.top = 0
 
-    def move_down(self) -> None:
+    def move_down(self, speed_multiplier: float = 1.0) -> None:
         """
         Mueve la paleta hacia abajo.
 
         Suma 'speed' pixeles a la posicion vertical. Si la paleta se saldria
         por debajo de la zona de juego, la fija en el borde inferior.
         """
-        self.rect.y += self.speed
+        self._frac_y += self.speed * speed_multiplier
+        dy = int(self._frac_y)
+        self._frac_y -= dy
+        self.rect.y += dy
         if self.rect.bottom > GAME_AREA_HEIGHT:
             self.rect.bottom = GAME_AREA_HEIGHT
 
@@ -90,11 +100,14 @@ class Paddle:
             speed_multiplier: Multiplicador de velocidad (1.0 = normal,
                               <1.0 = bullet time).
         """
-        effective_speed = round(speed * speed_multiplier)
+        effective_speed = speed * speed_multiplier
         diff = target_y - self.rect.centery
         if abs(diff) > effective_speed:
             # Mover en la direccion del objetivo
-            self.rect.y += effective_speed if diff > 0 else -effective_speed
+            self._frac_y += effective_speed if diff > 0 else -effective_speed
+            dy = int(self._frac_y)
+            self._frac_y -= dy
+            self.rect.y += dy
         # Mantener la paleta dentro de la zona de juego
         if self.rect.top < 0:
             self.rect.top = 0
@@ -146,6 +159,10 @@ class Ball:
         # Direccion horizontal aleatoria: izquierda (-1) o derecha (+1)
         self.speed_x: int = BALL_SPEED_X * random.choice([-1, 1])
         self.speed_y: int = BALL_SPEED_Y * random.choice([-1, 1])
+        self.rally_speed_multiplier: float = 1.0
+        # Acumuladores fraccionarios para multiplicadores muy bajos (modo agente)
+        self._frac_x: float = 0.0
+        self._frac_y: float = 0.0
 
     def reset(self) -> None:
         """
@@ -157,6 +174,26 @@ class Ball:
         self.rect.center = (WINDOW_WIDTH // 2, GAME_AREA_HEIGHT // 2)
         self.speed_x = BALL_SPEED_X * random.choice([-1, 1])
         self.speed_y = BALL_SPEED_Y * random.choice([-1, 1])
+        self.rally_speed_multiplier = 1.0
+        self._frac_x = 0.0
+        self._frac_y = 0.0
+
+    def sync_rally_speed(self, rally_hits: int) -> None:
+        """Ajusta la aceleracion acumulada segun la longitud del rally."""
+        extra_hits = max(0, rally_hits - BALL_RALLY_SPEEDUP_THRESHOLD)
+        extra_multiplier = min(
+            BALL_RALLY_MAX_SPEED_MULTIPLIER - 1.0,
+            extra_hits * BALL_RALLY_SPEEDUP_STEP,
+        )
+        self.rally_speed_multiplier = 1.0 + extra_multiplier
+
+    def get_effective_speed_x(self, speed_multiplier: float = 1.0) -> float:
+        """Velocidad horizontal efectiva tras bullet time y aceleracion de rally."""
+        return self.speed_x * speed_multiplier * self.rally_speed_multiplier
+
+    def get_effective_speed_y(self, speed_multiplier: float = 1.0) -> float:
+        """Velocidad vertical efectiva tras bullet time y aceleracion de rally."""
+        return self.speed_y * speed_multiplier * self.rally_speed_multiplier
 
     def update(self, speed_multiplier: float = 1.0) -> None:
         """
@@ -170,8 +207,14 @@ class Ball:
             speed_multiplier: Multiplicador de velocidad (1.0 = normal,
                               <1.0 = bullet time). Afecta ambos ejes.
         """
-        self.rect.x += round(self.speed_x * speed_multiplier)
-        self.rect.y += round(self.speed_y * speed_multiplier)
+        self._frac_x += self.get_effective_speed_x(speed_multiplier)
+        self._frac_y += self.get_effective_speed_y(speed_multiplier)
+        dx = int(self._frac_x)
+        dy = int(self._frac_y)
+        self._frac_x -= dx
+        self._frac_y -= dy
+        self.rect.x += dx
+        self.rect.y += dy
 
         # Rebote en la pared superior
         if self.rect.top <= 0:

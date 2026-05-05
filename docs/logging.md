@@ -1,11 +1,11 @@
 # Logging estructurado
 
-Pong IA usa el modulo `logging` de Python para reportar errores y
-diagnosticos internos. En ejecucion normal el juego no imprime nada
+Pong IA usa el módulo `logging` de Python para reportar errores y
+diagnósticos internos. En ejecución normal el juego no imprime nada
 extra; con el flag `--debug` se activan mensajes detallados.
 
 
-## Uso rapido
+## Uso rápido
 
 ```bash
 # Ejecucion normal (solo muestra WARNING y superiores)
@@ -25,7 +25,7 @@ interfieren con el output de juego en stdout
 
 ## Formato de salida
 
-Cada linea de log sigue el patron:
+Cada línea de log sigue el patrón:
 
 ```
 NIVEL [modulo] mensaje
@@ -41,17 +41,17 @@ DEBUG [pong.image_generator] Cargando pipeline de difusion...
 
 ## Niveles de logging
 
-| Nivel     | Cuando aparece | Ejemplo                              |
+| Nivel     | Cuándo aparece | Ejemplo                              |
 |-----------|----------------|--------------------------------------|
 | `DEBUG`   | Solo con `--debug` | Detalles internos de carga de modelos |
 | `INFO`    | Solo con `--debug` | Inicio de subsistemas                |
-| `WARNING` | Siempre            | Situaciones inesperadas no criticas  |
-| `ERROR`   | Siempre            | Fallos en llamadas LLM, generacion de imagenes |
+| `WARNING` | Siempre            | Situaciones inesperadas no críticas  |
+| `ERROR`   | Siempre            | Fallos en llamadas LLM, generación de imágenes |
 
 
-## Anadir logging a un modulo nuevo
+## Añadir logging a un módulo nuevo
 
-Seguir el patron ya establecido en `narrator.py` e `image_generator.py`:
+Seguir el patrón ya establecido en `narrator.py` e `image_generator.py`:
 
 ```python
 import logging
@@ -65,8 +65,8 @@ logger.warning("Algo inesperado pero no fatal")
 logger.error("Fallo en operacion: %s", exc)
 ```
 
-No hace falta configurar handlers ni formatters en cada modulo.
-`setup_logging()` en `main.py` se encarga de la configuracion
+No hace falta configurar handlers ni formatters en cada módulo.
+`setup_logging()` en `main.py` se encarga de la configuración
 global al arrancar el proceso.
 
 
@@ -82,16 +82,16 @@ pong/image_generator.py → logger = logging.getLogger(__name__)
 ```
 
 - `setup_logging()` se llama una vez al inicio, antes de crear `Game()`.
-- Cada modulo obtiene su propio logger con `getLogger(__name__)`.
+- Cada módulo obtiene su propio logger con `getLogger(__name__)`.
 - El nivel global se controla con `--debug` (DEBUG) o por defecto (WARNING).
 
 
-## Que NO usa logging
+## Qué NO usa logging
 
 - **`_emit_terminal_line()` en `game.py`**: Es output de juego para el
-  usuario (puntos, narracion, resumen). Se muestra en stdout y se
-  acumula en `terminal_log_lines` para la funcion de copiar/exportar.
-  No es logging diagnostico.
+  usuario (puntos, narración, resumen). Se muestra en stdout y se
+  acumula en `terminal_log_lines` para la función de copiar/exportar.
+  No es logging diagnóstico.
 
 - **`scripts/build_with_pyinstaller.py`**: Script standalone de build.
-  Sus `print()` son mensajes de progreso del proceso de compilacion.
+  Sus `print()` son mensajes de progreso del proceso de compilación.

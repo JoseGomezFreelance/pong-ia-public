@@ -1,14 +1,14 @@
-# Profiling y metricas de rendimiento
+# Profiling y métricas de rendimiento
 
-## Metricas automaticas
+## Métricas automáticas
 
-El juego recopila metricas de rendimiento durante la ejecucion:
+El juego recopila métricas de rendimiento durante la ejecución:
 
-- **FPS**: ventana rodante de los ultimos 120 frames
-- **Latencia LLM**: duracion de cada llamada al narrador (commentate, summary, question, enrich_image)
-- **Tiempo SD**: duracion de cada generacion de imagen con Stable Diffusion
+- **FPS**: ventana rodante de los últimos 120 frames
+- **Latencia LLM**: duración de cada llamada al narrador (commentate, summary, question, enrich_image)
+- **Tiempo SD**: duración de cada generación de imagen con Stable Diffusion
 
-Al cerrar el juego, las metricas se exportan a `saves/perf_last.json` y se muestran en la terminal.
+Al cerrar el juego, las métricas se exportan a `saves/perf_last.json` y se muestran en la terminal.
 
 ## Profiling manual con cProfile
 
@@ -38,13 +38,13 @@ py-spy top -- python main.py
 
 ## Benchmarks automatizados
 
-Los benchmarks estan en `tests/test_benchmark.py` y se ejecutan en CI:
+Los benchmarks están en `tests/test_benchmark.py` y se ejecutan en CI:
 
-| Test | Que mide | Umbral |
+| Test | Qué mide | Umbral |
 |------|----------|--------|
 | `test_fps_headless_baseline` | FPS promedio en 600 frames | >= 200 |
 | `test_frame_budget_no_spikes` | Peor frame individual | < 50ms |
-| `test_update_throughput` | Updates/s (solo logica) | >= 500 |
+| `test_update_throughput` | Updates/s (solo lógica) | >= 500 |
 
 Ejecutar localmente:
 

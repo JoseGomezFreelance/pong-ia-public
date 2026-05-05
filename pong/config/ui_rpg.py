@@ -1,0 +1,150 @@
+"""Constantes de UI para el sistema RPG: pantallas de habilidades y ascension."""
+
+__all__ = [
+    # Boton "Habilidades" en pantalla final
+    "END_SCREEN_SKILLS_BUTTON_WIDTH",
+    "END_SCREEN_SKILLS_BUTTON_HEIGHT",
+    "END_SCREEN_SKILLS_BUTTON_TEXT",
+    "COLOR_SKILLS_BUTTON_BG",
+    "COLOR_SKILLS_BUTTON_HOVER_BG",
+    "COLOR_SKILLS_BUTTON_BORDER",
+    # Boton "Ascender" en pantalla final
+    "END_SCREEN_ASCENSION_BUTTON_WIDTH",
+    "END_SCREEN_ASCENSION_BUTTON_HEIGHT",
+    "END_SCREEN_ASCENSION_BUTTON_TEXT",
+    "COLOR_ASCENSION_BUTTON_BG",
+    "COLOR_ASCENSION_BUTTON_HOVER_BG",
+    "COLOR_ASCENSION_BUTTON_BORDER",
+    "COLOR_ASCENSION_BUTTON_TEXT",
+    # Pantalla de habilidades
+    "SKILLS_SCREEN_MARGIN_X",
+    "SKILLS_SCREEN_MARGIN_TOP",
+    "SKILLS_SCREEN_HEADER_HEIGHT",
+    "SKILL_CARD_WIDTH",
+    "SKILL_CARD_HEIGHT",
+    "SKILL_CARD_GAP_Y",
+    "SKILL_CARD_BORDER_WIDTH",
+    "SKILL_CARD_PADDING",
+    "SKILL_BUY_BUTTON_WIDTH",
+    "SKILL_BUY_BUTTON_HEIGHT",
+    # Colores pantalla habilidades
+    "COLOR_SKILL_LOCKED_BG",
+    "COLOR_SKILL_LOCKED_BORDER",
+    "COLOR_SKILL_LOCKED_TEXT",
+    "COLOR_SKILL_AVAILABLE_BG",
+    "COLOR_SKILL_AVAILABLE_BORDER",
+    "COLOR_SKILL_AVAILABLE_TEXT",
+    "COLOR_SKILL_PURCHASED_BG",
+    "COLOR_SKILL_PURCHASED_BORDER",
+    "COLOR_SKILL_PURCHASED_TEXT",
+    "COLOR_SKILL_NAME",
+    "COLOR_SKILL_DESC",
+    "COLOR_SKILL_COST",
+    "COLOR_SKILL_BUY_BG",
+    "COLOR_SKILL_BUY_HOVER_BG",
+    # Pantalla de ascension
+    "ASCENSION_SCREEN_MARGIN_X",
+    "ASCENSION_SCREEN_MARGIN_TOP",
+    "ASCENSION_SCREEN_HEADER_HEIGHT",
+    "ASCENSION_CARD_WIDTH",
+    "ASCENSION_CARD_HEIGHT",
+    "ASCENSION_CARD_GAP_Y",
+    "COLOR_ASCENSION_GOLD",
+    "COLOR_ASCENSION_GOLD_DARK",
+    "COLOR_ASCENSION_CONFIRM_BG",
+    "COLOR_ASCENSION_CONFIRM_HOVER_BG",
+    # Boton "Volver" (compartido entre pantallas RPG)
+    "RPG_BACK_BUTTON_WIDTH",
+    "RPG_BACK_BUTTON_HEIGHT",
+    "RPG_BACK_BUTTON_MARGIN_TOP",
+    "RPG_BACK_BUTTON_TEXT",
+]
+
+
+# ============================================================
+# BOTON "Habilidades" EN PANTALLA FINAL (magenta)
+# ============================================================
+END_SCREEN_SKILLS_BUTTON_WIDTH = 220
+END_SCREEN_SKILLS_BUTTON_HEIGHT = 34
+END_SCREEN_SKILLS_BUTTON_TEXT = "Habilidades"
+COLOR_SKILLS_BUTTON_BG = (170, 0, 170)        # ZX_MAGENTA_DARK
+COLOR_SKILLS_BUTTON_HOVER_BG = (255, 85, 255)  # ZX_MAGENTA_BRIGHT
+COLOR_SKILLS_BUTTON_BORDER = (255, 85, 255)    # ZX_MAGENTA_BRIGHT
+
+
+# ============================================================
+# BOTON "Ascender" EN PANTALLA FINAL (dorado)
+# ============================================================
+END_SCREEN_ASCENSION_BUTTON_WIDTH = 220
+END_SCREEN_ASCENSION_BUTTON_HEIGHT = 34
+END_SCREEN_ASCENSION_BUTTON_TEXT = "Ascender"
+COLOR_ASCENSION_BUTTON_BG = (170, 85, 0)       # ZX_BROWN (dorado oscuro)
+COLOR_ASCENSION_BUTTON_HOVER_BG = (255, 255, 85)  # ZX_YELLOW
+COLOR_ASCENSION_BUTTON_BORDER = (255, 255, 85)    # ZX_YELLOW
+COLOR_ASCENSION_BUTTON_TEXT = (255, 255, 85)       # ZX_YELLOW
+
+
+# ============================================================
+# PANTALLA DE HABILIDADES RPG
+# ============================================================
+SKILLS_SCREEN_MARGIN_X = 20
+SKILLS_SCREEN_MARGIN_TOP = 20
+SKILLS_SCREEN_HEADER_HEIGHT = 70
+
+# Tarjetas de habilidad (lista vertical, ancho completo)
+SKILL_CARD_WIDTH = 760               # 800 - 2*20 margen
+SKILL_CARD_HEIGHT = 52
+SKILL_CARD_GAP_Y = 4
+SKILL_CARD_BORDER_WIDTH = 1
+SKILL_CARD_PADDING = 8
+SKILL_BUY_BUTTON_WIDTH = 100
+SKILL_BUY_BUTTON_HEIGHT = 28
+
+# Colores — habilidad bloqueada (nivel insuficiente)
+COLOR_SKILL_LOCKED_BG = (15, 15, 15)
+COLOR_SKILL_LOCKED_BORDER = (50, 50, 50)
+COLOR_SKILL_LOCKED_TEXT = (85, 85, 85)
+
+# Colores — habilidad disponible para compra
+COLOR_SKILL_AVAILABLE_BG = (15, 15, 40)
+COLOR_SKILL_AVAILABLE_BORDER = (85, 85, 255)     # ZX_BLUE_BRIGHT
+COLOR_SKILL_AVAILABLE_TEXT = (200, 200, 200)
+
+# Colores — habilidad comprada
+COLOR_SKILL_PURCHASED_BG = (15, 30, 15)
+COLOR_SKILL_PURCHASED_BORDER = (85, 255, 85)     # ZX_GREEN_BRIGHT
+COLOR_SKILL_PURCHASED_TEXT = (85, 255, 85)
+
+# Colores — textos de tarjeta
+COLOR_SKILL_NAME = (255, 255, 85)                # ZX_YELLOW
+COLOR_SKILL_DESC = (170, 170, 170)               # Gris claro
+COLOR_SKILL_COST = (85, 85, 255)                 # ZX_BLUE_BRIGHT
+COLOR_SKILL_BUY_BG = (0, 0, 170)                 # ZX_BLUE_DARK
+COLOR_SKILL_BUY_HOVER_BG = (85, 85, 255)         # ZX_BLUE_BRIGHT
+
+
+# ============================================================
+# PANTALLA DE ASCENSION
+# ============================================================
+ASCENSION_SCREEN_MARGIN_X = 20
+ASCENSION_SCREEN_MARGIN_TOP = 20
+ASCENSION_SCREEN_HEADER_HEIGHT = 100
+
+ASCENSION_CARD_WIDTH = 760
+ASCENSION_CARD_HEIGHT = 44
+ASCENSION_CARD_GAP_Y = 3
+
+# Colores dorados de ascension
+COLOR_ASCENSION_GOLD = (255, 255, 85)            # ZX_YELLOW
+COLOR_ASCENSION_GOLD_DARK = (170, 85, 0)         # ZX_BROWN
+COLOR_ASCENSION_CONFIRM_BG = (170, 85, 0)        # ZX_BROWN
+COLOR_ASCENSION_CONFIRM_HOVER_BG = (255, 255, 85)  # ZX_YELLOW
+
+
+# ============================================================
+# BOTON "Volver" (compartido entre pantallas RPG)
+# ============================================================
+RPG_BACK_BUTTON_WIDTH = 110
+RPG_BACK_BUTTON_HEIGHT = 34
+RPG_BACK_BUTTON_MARGIN_TOP = 16
+RPG_BACK_BUTTON_TEXT = "Volver"

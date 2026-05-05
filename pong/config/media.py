@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -50,12 +51,14 @@ def _resolve_asset_path(relative: str) -> Path:
 
 
 def _resolve_writable_dir(relative: str) -> Path:
-    """Directorio escribible junto al .app o en la raiz del proyecto."""
+    """Directorio escribible en Application Support (frozen) o en el proyecto."""
     if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).resolve().parent
-        if exe_dir.name == "MacOS" and exe_dir.parent.name == "Contents":
-            return exe_dir.parent.parent.parent / relative
-        return exe_dir / relative
+        if sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support" / "PongIA"
+        else:
+            # Windows: %APPDATA%/PongIA
+            base = Path(os.environ.get("APPDATA", Path.home())) / "PongIA"
+        return base / relative
     return Path(relative)
 
 

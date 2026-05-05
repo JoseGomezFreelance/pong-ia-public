@@ -19,34 +19,29 @@ from pong.config.layout import GAME_AREA_HEIGHT
 from pong.config.narrator import SUMMARY_MIN_REASONING_SECONDS
 from pong.config.ui_end_screen import END_SCREEN_COPY_STATUS_SECONDS
 from pong.emotional_state import EmotionalState
+from pong.game_state import MatchState, UIState
 from pong.question_system import QuestionSystem
 from pong.save_manager import load_history, save_session
-from pong.scoring import ScoreState
 
 if TYPE_CHECKING:
     from pong.achievements import AchievementEngine
     from pong.entities import Ball, Paddle
     from pong.protocols import NarrationBridgeProtocol, SoundManagerProtocol
     from pong.renderer import Renderer
+    from pong.rpg_engine import RPGState
 
 
 class GamePersistenceMixin:
     """Métodos de guardado, exportación y reinicio, usados por Game vía herencia."""
 
     # -- Atributos declarados en Game, visibles aquí para mypy --
-    copy_status_text: str
-    copy_status_expires_at: float
+    match: MatchState
+    ui: UIState
     terminal_log_lines: list[str]
     game_end_time: float | None
     game_start_time: float
-    showing_end_screen: bool
-    showing_achievements_screen: bool
-    showing_debug_screen: bool
     _cached_stats_data: dict[str, Any] | None
     paused: bool
-    end_screen_scroll: int
-    achievements_screen_scroll: int
-    debug_screen_scroll: int
     match_summary_text: str | None
     match_summary_requested: bool
     match_summary_start_time: float | None
@@ -54,13 +49,9 @@ class GamePersistenceMixin:
     game_saved: bool
     new_records: list[str]
     records: dict[str, Any]
-    score: ScoreState
-    last_play: str
-    rally_hits: int
-    max_rally_hits: int
-    score_timeline: list[dict[str, Any]]
     player: Paddle
     computer: Paddle
+    computer_home_x: int
     ball: Ball
     emotional_state: EmotionalState
     emotional_target: EmotionalState
@@ -72,6 +63,7 @@ class GamePersistenceMixin:
     narration: NarrationBridgeProtocol
     achievements: AchievementEngine
     sounds: SoundManagerProtocol
+    rpg: RPGState
     imagegen_unlocked: bool
     imagegen_active: bool
     _last_imagegen_time: float
@@ -87,6 +79,15 @@ class GamePersistenceMixin:
     def _format_elapsed(total_seconds: float) -> str:
         raise NotImplementedError  # Provided by Game
 
+    def _prepare_match(self) -> None:
+        raise NotImplementedError  # Provided by Game
+
+    def _sync_local_records_to_peer_network(self) -> None:
+        raise NotImplementedError  # Provided by Game
+
+    # _rpg_get_save_data, _init_rpg, _rpg_apply_modifiers: GameRPGMixin
+    # (must appear AFTER GameRPGMixin in MRO)
+
     def _set_copy_status(self, message: str) -> None:
         """
         Actualiza el mensaje temporal del botón copiar.
@@ -94,8 +95,8 @@ class GamePersistenceMixin:
         Args:
             message: Texto breve de estado para la pantalla final.
         """
-        self.copy_status_text = message
-        self.copy_status_expires_at = (
+        self.ui.copy_status_text = message
+        self.ui.copy_status_expires_at = (
             time.monotonic() + END_SCREEN_COPY_STATUS_SECONDS
         )
 
@@ -182,21 +183,21 @@ class GamePersistenceMixin:
         self._emit_terminal_line("FIN DE PARTIDA \u2014 Resumen completo")
         self._emit_terminal_line("=" * 60)
         self._emit_terminal_line(
-            f"Sets finales: Jugador {self.score.player_sets} - "
-            f"Ordenador {self.score.computer_sets}"
+            f"Sets finales: Jugador {self.match.score.player_sets} - "
+            f"Ordenador {self.match.score.computer_sets}"
         )
         self._emit_terminal_line(
-            f"Juegos del ultimo set: Jugador {self.score.player_games} - "
-            f"Ordenador {self.score.computer_games}"
+            f"Juegos del ultimo set: Jugador {self.match.score.player_games} - "
+            f"Ordenador {self.match.score.computer_games}"
         )
         self._emit_terminal_line(f"Tiempo total: {self._format_elapsed(elapsed_total)}")
         self._emit_terminal_line()
 
         self._emit_terminal_line("--- EVENTOS DE PUNTO ---")
-        if not self.score_timeline:
+        if not self.match.score_timeline:
             self._emit_terminal_line("  Sin puntos registrados.")
         else:
-            for point in self.score_timeline:
+            for point in self.match.score_timeline:
                 stamp = self._format_elapsed(point["elapsed_seconds"])
                 self._emit_terminal_line(
                     f"  [{stamp}] {point['description']} -> {point['scoreboard']}"
@@ -261,7 +262,7 @@ class GamePersistenceMixin:
         ) - self.game_start_time
 
         # Determinar ganador
-        if self.score.player_sets > self.score.computer_sets:
+        if self.match.score.player_sets > self.match.score.computer_sets:
             winner = "el Jugador"
         else:
             winner = "el Ordenador"
@@ -274,7 +275,7 @@ class GamePersistenceMixin:
         current_player_streak = 0
         current_computer_streak = 0
 
-        for point in self.score_timeline:
+        for point in self.match.score_timeline:
             desc = point["description"].lower()
             if "jugador" in desc:
                 player_pts_total += 1
@@ -303,10 +304,10 @@ class GamePersistenceMixin:
         match_data = {
             "winner": winner,
             "final_sets": (
-                f"{self.score.player_sets}-{self.score.computer_sets}"
+                f"{self.match.score.player_sets}-{self.match.score.computer_sets}"
             ),
             "final_games_last_set": (
-                f"{self.score.player_games}-{self.score.computer_games}"
+                f"{self.match.score.player_games}-{self.match.score.computer_games}"
             ),
             "elapsed_text": self._format_elapsed(elapsed_total),
             "total_points": player_pts_total + computer_pts_total,
@@ -353,7 +354,7 @@ class GamePersistenceMixin:
         computer_pts = 0
         max_streak = 0
         current_streak = 0
-        for point in self.score_timeline:
+        for point in self.match.score_timeline:
             desc = point["description"].lower()
             if "jugador" in desc:
                 player_pts += 1
@@ -365,20 +366,20 @@ class GamePersistenceMixin:
 
         winner = (
             "jugador"
-            if self.score.player_sets > self.score.computer_sets
+            if self.match.score.player_sets > self.match.score.computer_sets
             else "ordenador"
         )
 
         session_data = {
             "winner": winner,
-            "player_sets": self.score.player_sets,
-            "computer_sets": self.score.computer_sets,
-            "player_games": self.score.player_games,
-            "computer_games": self.score.computer_games,
+            "player_sets": self.match.score.player_sets,
+            "computer_sets": self.match.score.computer_sets,
+            "player_games": self.match.score.player_games,
+            "computer_games": self.match.score.computer_games,
             "player_points_total": player_pts,
             "computer_points_total": computer_pts,
             "elapsed_seconds": round(elapsed_total, 1),
-            "max_rally": self.max_rally_hits,
+            "max_rally": self.match.max_rally_hits,
             "longest_player_streak": max_streak,
             "point_differential": player_pts - computer_pts,
             "llm_summary": self.match_summary_text or "",
@@ -404,12 +405,15 @@ class GamePersistenceMixin:
                     f"Desbloqueado: {self.achievements.definitions[aid].name}",
                 )
 
-        # Persistir con logros y estadísticas de carrera
+        # Persistir con logros, estadísticas de carrera y RPG
+        rpg_data = self._rpg_get_save_data()  # type: ignore[attr-defined]
         self.records, self.new_records, newly_unlocked = save_session(
             session_data,
             achievements=self.achievements.get_save_data(),
             career_stats=self.achievements.get_career_stats_data(),
+            rpg_data=rpg_data,
         )
+        self._sync_local_records_to_peer_network()
 
         if self.new_records:
             self._log(
@@ -421,6 +425,9 @@ class GamePersistenceMixin:
         if "imagegen" in newly_unlocked:
             self.imagegen_unlocked = True
             self._log("FASE", "Fase visual generativa desbloqueada")
+        if "rpg" in newly_unlocked:
+            self.rpg.rpg_unlocked = True
+            self._log("FASE", "Modo RPG desbloqueado!")
 
     # --------------------------------------------------------
     # Reinicio de partida
@@ -434,36 +441,28 @@ class GamePersistenceMixin:
         pero se limpia todo el estado del partido (marcador, timeline, preguntas,
         resumen final y logs temporales de pantalla).
         """
-        if self.showing_end_screen and not self.game_saved:
+        if self.ui.showing_end_screen and not self.game_saved:
             self._save_game()
 
-        self.showing_end_screen = False
-        self.showing_achievements_screen = False
-        self.showing_debug_screen = False
+        # Resetear estado agrupado
+        self.match = MatchState()
+        self.ui = UIState()
+
         self._cached_stats_data = None
         self.paused = False
-        self.end_screen_scroll = 0
-        self.achievements_screen_scroll = 0
-        self.debug_screen_scroll = 0
         self.game_start_time = time.monotonic()
         self.game_end_time = None
         self.match_summary_text = None
         self.match_summary_requested = False
         self.match_summary_start_time = None
         self._displayed_summary_progress = 0.0
-        self.copy_status_text = ""
-        self.copy_status_expires_at = 0.0
         self.game_saved = False
         self.new_records = []
 
-        self.score = ScoreState()
-        self.last_play = "Saque inicial"
-        self.rally_hits = 0
-        self.max_rally_hits = 0
-        self.score_timeline = []
-
         center_y = GAME_AREA_HEIGHT // 2 - PADDLE_HEIGHT // 2
         self.player.rect.y = center_y
+        if hasattr(self, "computer_home_x") and hasattr(self.computer.rect, "x"):
+            self.computer.rect.x = self.computer_home_x
         self.computer.rect.y = center_y
         self.ball.reset()
 
@@ -474,21 +473,11 @@ class GamePersistenceMixin:
         self._player_sample_counter = 0
         self._player_idle_score = 0.0
 
-        self.questions = QuestionSystem(self.game_start_time)
         self.narration.reset_match_state()
-        self.narration.request_reformulation(
-            self.questions.selected_initial_question
-        )
+        self._prepare_match()
 
-        self.achievements.start_match()
         self.achievements.pending_notifications.clear()
         self.achievements.set_notification_start(None)
-
-        game_state = self.narration.build_game_state(
-            "inicio", self.score, self.ball, self.rally_hits,
-            self.last_play, 0.0,
-        )
-        self.narration.request("inicio", game_state, priority=True)
 
         # Resetear fase visual generativa (el modelo permanece cargado)
         self.imagegen_active = False
@@ -497,5 +486,8 @@ class GamePersistenceMixin:
         # Recargar estado de desbloqueo (puede haberse desbloqueado en la partida anterior)
         _history = load_history()
         self.imagegen_unlocked = "imagegen" in _history.get("phases_unlocked", {})
+
+        # Recargar estado RPG (conserva progreso entre partidas)
+        self._init_rpg()  # type: ignore[attr-defined]
 
         self._log("PARTIDA", "Nueva partida iniciada.")

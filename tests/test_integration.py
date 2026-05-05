@@ -6,6 +6,13 @@ import unittest
 import pygame
 import pytest
 
+from pong.config.gameplay import (
+    AI_RALLY_PRESS_STEP,
+    AI_RALLY_PRESS_THRESHOLD,
+    BALL_RALLY_SPEEDUP_THRESHOLD,
+    BALL_SPEED_X,
+)
+from pong.config.layout import WINDOW_WIDTH
 from pong.harness import GameHarness
 
 
@@ -93,6 +100,60 @@ class TestStateConsistency(unittest.TestCase):
 
             # Elapsed positive
             self.assertGreaterEqual(state["elapsed_seconds"], 0)
+
+
+class TestAntiInfiniteRallyDifficulty(unittest.TestCase):
+
+    def test_ball_moves_faster_during_long_rally(self) -> None:
+        with GameHarness.create() as h:
+            g = h.game
+            g.match.rally_hits = BALL_RALLY_SPEEDUP_THRESHOLD + 20
+            g.ball.sync_rally_speed(g.match.rally_hits)
+            g.ball.speed_x = BALL_SPEED_X
+            g.ball.speed_y = 0
+            x_before = g.ball.rect.x
+
+            h.step(1)
+
+            self.assertEqual(g.ball.rect.x - x_before, 6)
+
+    def test_computer_press_and_point_reset(self) -> None:
+        with GameHarness.create() as h:
+            g = h.game
+            g.match.rally_hits = AI_RALLY_PRESS_THRESHOLD + 2
+            g.ball.sync_rally_speed(g.match.rally_hits)
+
+            h.step(1)
+
+            self.assertEqual(
+                g.computer.rect.x,
+                g.computer_home_x - 2 * AI_RALLY_PRESS_STEP,
+            )
+
+            g.ball.rect.right = WINDOW_WIDTH + 1
+            g.ball.speed_x = BALL_SPEED_X
+            g.ball.speed_y = 0
+
+            h.step(1)
+
+            self.assertEqual(g.match.rally_hits, 0)
+            self.assertEqual(g.ball.rally_speed_multiplier, 1.0)
+            self.assertEqual(g.computer.rect.x, g.computer_home_x)
+
+    def test_restart_resets_rally_pressure(self) -> None:
+        with GameHarness.create() as h:
+            g = h.game
+            g.match.rally_hits = AI_RALLY_PRESS_THRESHOLD + 5
+            g.ball.sync_rally_speed(g.match.rally_hits)
+
+            h.step(1)
+            self.assertLess(g.computer.rect.x, g.computer_home_x)
+
+            g._restart_match()
+
+            self.assertEqual(g.match.rally_hits, 0)
+            self.assertEqual(g.ball.rally_speed_multiplier, 1.0)
+            self.assertEqual(g.computer.rect.x, g.computer_home_x)
 
 
 @pytest.mark.slow

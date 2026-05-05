@@ -96,6 +96,9 @@ class _NullNarrator:
     status_message = "Narrador desactivado (modo headless)"
     memory: list[dict[str, str]] = []
 
+    def reload_llm(self) -> None:
+        pass
+
 
 class _NullNarrationBridge:
     """Drop-in silencioso para NarrationBridge."""
@@ -290,17 +293,17 @@ class GameHarness:
                 "y": g.computer.rect.y,
             },
             "score": {
-                "player_points": g.score.player_points,
-                "computer_points": g.score.computer_points,
-                "player_games": g.score.player_games,
-                "computer_games": g.score.computer_games,
-                "player_sets": g.score.player_sets,
-                "computer_sets": g.score.computer_sets,
+                "player_points": g.match.score.player_points,
+                "computer_points": g.match.score.computer_points,
+                "player_games": g.match.score.player_games,
+                "computer_games": g.match.score.computer_games,
+                "player_sets": g.match.score.player_sets,
+                "computer_sets": g.match.score.computer_sets,
             },
-            "rally_hits": g.rally_hits,
-            "max_rally_hits": g.max_rally_hits,
+            "rally_hits": g.match.rally_hits,
+            "max_rally_hits": g.match.max_rally_hits,
             "paused": g.paused,
-            "showing_end_screen": g.showing_end_screen,
+            "showing_end_screen": g.ui.showing_end_screen,
             "running": g.running,
             "narration_text": g.narration.narration_text,
             "elapsed_seconds": elapsed,

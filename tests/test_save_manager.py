@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import unittest
 from pathlib import Path
 from typing import Any
@@ -42,7 +44,8 @@ class TestLoadHistory(unittest.TestCase):
         finally:
             path.unlink()
 
-    def test_loads_valid_json(self) -> None:
+    def test_unsigned_json_is_discarded(self) -> None:
+        """Un archivo valido pero sin firma HMAC se descarta."""
         import tempfile
         data = {
             "version": "1.2",
@@ -53,13 +56,14 @@ class TestLoadHistory(unittest.TestCase):
             json.dump(data, f)
             path = Path(f.name)
         try:
-            with patch.object(sm, "SAVE_FILE", path):
+            import warnings as w
+            with patch.object(sm, "SAVE_FILE", path), \
+                 w.catch_warnings(record=True):
+                w.simplefilter("always")
                 h = sm.load_history()
-            self.assertEqual(len(h["sessions"]), 1)
-            # Should migrate missing keys
-            self.assertIn("achievements", h)
-            self.assertIn("career_stats", h)
-            self.assertIn("phases_unlocked", h)
+            # Archivo sin firma: descartado, historial vacio
+            self.assertEqual(h["sessions"], [])
+            self.assertEqual(h["version"], sm._CURRENT_VERSION)
         finally:
             path.unlink()
 
@@ -229,7 +233,8 @@ class TestSaveSession(unittest.TestCase):
         save_file = save_dir / "game_history.json"
 
         with patch.object(sm, "SAVE_DIR", save_dir), \
-             patch.object(sm, "SAVE_FILE", save_file):
+             patch.object(sm, "SAVE_FILE", save_file), \
+             patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
             session = {
                 "winner": "jugador",
                 "player_points_total": 18,
@@ -251,6 +256,35 @@ class TestSaveSession(unittest.TestCase):
         # Cleanup
         import shutil
         shutil.rmtree(tmpdir)
+
+    @unittest.skipUnless(os.name == "posix", "Permisos owner-only solo aplican en POSIX")
+    def test_save_history_sets_owner_only_permissions(self) -> None:
+        """game_history.json debe quedar protegido con 0600 en POSIX."""
+        import tempfile
+
+        tmpdir = Path(tempfile.mkdtemp())
+        save_dir = tmpdir / "saves"
+        save_file = save_dir / "game_history.json"
+
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                session = {
+                    "winner": "jugador",
+                    "player_points_total": 18,
+                    "elapsed_seconds": 90,
+                    "max_rally": 10,
+                    "longest_player_streak": 4,
+                    "point_differential": 6,
+                }
+                sm.save_session(session)
+
+            mode = stat.S_IMODE(save_file.stat().st_mode)
+            self.assertEqual(mode, 0o600)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
 
 
 class TestCheckPhaseUnlocks(unittest.TestCase):
@@ -283,6 +317,192 @@ class TestCheckPhaseUnlocks(unittest.TestCase):
         }
         unlocked = sm.check_phase_unlocks(history)
         self.assertEqual(unlocked, [])
+
+
+class TestIntegrity(unittest.TestCase):
+    """Tests de integridad criptografica (cadena de hashes + HMAC)."""
+
+    def _make_tmp(self) -> tuple[Path, Path, Path]:
+        import tempfile
+        tmpdir = Path(tempfile.mkdtemp())
+        save_dir = tmpdir / "saves"
+        save_file = save_dir / "game_history.json"
+        return tmpdir, save_dir, save_file
+
+    def _sample_session(self, pts: int = 18) -> dict[str, Any]:
+        return {
+            "winner": "jugador",
+            "player_points_total": pts,
+            "elapsed_seconds": 90,
+            "max_rally": 10,
+            "longest_player_streak": 4,
+            "point_differential": 6,
+        }
+
+    def test_chain_hash_computed_on_save(self) -> None:
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                with open(save_file) as f:
+                    data = json.load(f)
+                self.assertIn("_chain_hash", data["sessions"][0])
+                self.assertEqual(len(data["sessions"][0]["_chain_hash"]), 64)
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_chain_validates_after_two_saves(self) -> None:
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session(10))
+                sm.save_session(self._sample_session(20))
+                with open(save_file) as f:
+                    data = json.load(f)
+                self.assertTrue(sm._validate_chain(data["sessions"]))
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_hmac_present_after_save(self) -> None:
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                with open(save_file) as f:
+                    data = json.load(f)
+                self.assertIn("_hmac", data)
+                self.assertEqual(len(data["_hmac"]), 64)
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_hmac_validates_after_save(self) -> None:
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                with open(save_file) as f:
+                    data = json.load(f)
+                self.assertTrue(sm._verify_hmac(data))
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_tampered_session_breaks_chain(self) -> None:
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                # Tamper with the saved file
+                with open(save_file) as f:
+                    data = json.load(f)
+                data["sessions"][0]["player_points_total"] = 999
+                with open(save_file, "w") as f:
+                    json.dump(data, f)
+                self.assertFalse(sm._validate_chain(data["sessions"]))
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_tampered_file_breaks_hmac(self) -> None:
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                with open(save_file) as f:
+                    data = json.load(f)
+                data["sessions"][0]["player_points_total"] = 999
+                self.assertFalse(sm._verify_hmac(data))
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_unsigned_file_is_discarded(self) -> None:
+        """Archivo sin firma se descarta y devuelve historial vacio."""
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            save_dir.mkdir(parents=True)
+            old_data = {
+                "version": "1.3",
+                "sessions": [
+                    {"date": "2025-01-01", "winner": "jugador",
+                     "player_points_total": 15, "elapsed_seconds": 120,
+                     "max_rally": 8, "longest_player_streak": 3,
+                     "point_differential": 5},
+                ],
+                "records": {},
+            }
+            with open(save_file, "w") as f:
+                json.dump(old_data, f)
+
+            import warnings as w
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 w.catch_warnings(record=True):
+                w.simplefilter("always")
+                h = sm.load_history()
+                # Archivo sin firma descartado: historial vacio
+                self.assertEqual(h["sessions"], [])
+                self.assertEqual(h["version"], sm._CURRENT_VERSION)
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_tampered_file_is_discarded(self) -> None:
+        """Archivo manipulado se descarta y devuelve historial vacio."""
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                # Tamper
+                with open(save_file) as f:
+                    data = json.load(f)
+                data["sessions"][0]["player_points_total"] = 999
+                with open(save_file, "w") as f:
+                    json.dump(data, f)
+                import warnings as w
+                with w.catch_warnings(record=True):
+                    w.simplefilter("always")
+                    h = sm.load_history()
+                # Archivo manipulado descartado: historial vacio
+                self.assertEqual(h["sessions"], [])
+
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
+
+    def test_unsigned_file_gets_signed_on_write(self) -> None:
+        """Archivo v1.3 se firma al guardar una nueva sesion."""
+        tmpdir, save_dir, save_file = self._make_tmp()
+        try:
+            save_dir.mkdir(parents=True)
+            old_data = {
+                "version": "1.3",
+                "sessions": [],
+                "records": {},
+            }
+            with open(save_file, "w") as f:
+                json.dump(old_data, f)
+
+            with patch.object(sm, "SAVE_DIR", save_dir), \
+                 patch.object(sm, "SAVE_FILE", save_file), \
+                 patch("pong.save_manager._get_platform_uuid", return_value="TEST-UUID-1234"):
+                sm.save_session(self._sample_session())
+                with open(save_file) as f:
+                    data = json.load(f)
+                self.assertIn("_hmac", data)
+                self.assertEqual(data["version"], sm._CURRENT_VERSION)
+                self.assertTrue(sm._verify_hmac(data))
+        finally:
+            import shutil; shutil.rmtree(tmpdir)
 
 
 if __name__ == "__main__":

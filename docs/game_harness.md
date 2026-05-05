@@ -1,20 +1,20 @@
-# GameHarness -- Testing programatico del juego
+# GameHarness -- Testing programático del juego
 
 El `GameHarness` permite ejecutar Pong sin ventana visible, controlar el
 juego frame a frame, inyectar inputs de teclado, leer el estado completo y
-capturar screenshots del renderizado. Es util para:
+capturar screenshots del renderizado. Es útil para:
 
-- Tests automatizados (pytest) que verifican logica de juego.
-- Simulacion de partidas completas para detectar bugs.
-- Captura de screenshots para regresion visual.
-- Pruebas con LLM e imagegen sin necesidad de interfaz grafica.
+- Tests automatizados (pytest) que verifican lógica de juego.
+- Simulación de partidas completas para detectar bugs.
+- Captura de screenshots para regresión visual.
+- Pruebas con LLM e imagegen sin necesidad de interfaz gráfica.
 
 
-## API rapida
+## API rápida
 
 ### HeadlessConfig
 
-Controla que subsistemas se activan:
+Controla qué subsistemas se activan:
 
 ```python
 from pong.harness import HeadlessConfig
@@ -28,7 +28,7 @@ config = HeadlessConfig(
 )
 ```
 
-Por defecto todo esta desactivado para tests rapidos. Los subsistemas
+Por defecto todo está desactivado para tests rápidos. Los subsistemas
 desactivados se reemplazan por null objects que implementan la misma interfaz
 sin hacer nada.
 
@@ -47,7 +47,7 @@ harness.save_screenshot("/tmp/f.png")  # guardar como PNG
 harness.close()                        # limpiar recursos
 ```
 
-Tambien funciona como context manager:
+También funciona como context manager:
 
 ```python
 with GameHarness.create() as h:
@@ -56,9 +56,9 @@ with GameHarness.create() as h:
 ```
 
 
-## Ejemplo basico
+## Ejemplo básico
 
-Script minimo que arranca el juego, avanza 1 segundo y captura un screenshot:
+Script mínimo que arranca el juego, avanza 1 segundo y captura un screenshot:
 
 ```python
 from pong.harness import GameHarness
@@ -84,7 +84,7 @@ harness = GameHarness.create()
 
 Ejemplo completo de una partida con estrategia "humana imperfecta" que
 produce puntos y termina. La estrategia alterna entre seguir la bola (modo
-activo) y despistarse (modo distraido):
+activo) y despistarse (modo distraído):
 
 ```python
 import random
@@ -165,13 +165,13 @@ inactividad o movimiento aleatorio.
 ## Partida con LLM e imagegen
 
 Para probar con todos los subsistemas activos (narrador IA, generador de
-imagenes), hay que tener en cuenta que el tiempo del juego depende de
+imágenes), hay que tener en cuenta que el tiempo del juego depende de
 `time.monotonic()`. Como `step()` no llama `clock.tick()`, los frames corren
-a velocidad maxima y el reloj real apenas avanza. Los subsistemas que usan
-temporizadores (narracion cada 8s, imagegen a los 180s) necesitan que pase
+a velocidad máxima y el reloj real apenas avanza. Los subsistemas que usan
+temporizadores (narración cada 8s, imagegen a los 180s) necesitan que pase
 tiempo real.
 
-Solucion: intercalar `time.sleep()` entre batches de frames para que el
+Solución: intercalar `time.sleep()` entre batches de frames para que el
 reloj real avance al ritmo del juego:
 
 ```python
@@ -212,17 +212,17 @@ harness.close()
 
 | Evento                     | Tiempo real |
 |----------------------------|-------------|
-| Inicializacion LLM         | ~3-5s       |
-| Primera narracion           | ~3s         |
-| Narraciones periodicas     | cada ~8s    |
-| Activacion imagegen        | ~180s (3 min) |
-| Generacion de imagen SD    | ~15-30s     |
+| Inicialización LLM         | ~3-5s       |
+| Primera narración           | ~3s         |
+| Narraciones periódicas     | cada ~8s    |
+| Activación imagegen        | ~180s (3 min) |
+| Generación de imagen SD    | ~15-30s     |
 | Partida completa con LLM   | ~4-5 min    |
 
 
 ## Testing interactivo frame a frame
 
-Si necesitas inspeccionar un bug visual especifico, puedes usar el harness
+Si necesitas inspeccionar un bug visual específico, puedes usar el harness
 desde un script o desde la consola de un agente para avanzar
 frame a frame, ver screenshots y tomar decisiones:
 
@@ -252,35 +252,35 @@ h.save_screenshot("/tmp/debug_03.png")
 h.close()
 ```
 
-## Hallazgos y notas tecnicas
+## Hallazgos y notas técnicas
 
 ### Rallies infinitos
 
 Cuando ambas paletas (jugador y ordenador) siguen la bola sin error, la
 partida entra en un punto muerto indefinido. Se han observado rallies de
 129 y 257 golpes sin que nadie anote. Esto es un comportamiento emergente
-de la fisica del juego: la bola no acelera y los angulos son predecibles.
+de la física del juego: la bola no acelera y los ángulos son predecibles.
 
 ### Tiempo real vs tiempo de juego
 
-`step()` **no** llama `clock.tick()`. Los frames corren a velocidad maxima
+`step()` **no** llama `clock.tick()`. Los frames corren a velocidad máxima
 del CPU. Esto significa:
 
 - 18.000 frames (5 min de juego a 60fps) se ejecutan en ~8 segundos reales.
 - `time.monotonic()` avanza por reloj de pared, no por frames simulados.
-- Funcionalidades con delay (preguntas a los 30s, musica a los 30s, imagegen
-  a los 180s) se activan segun el tiempo real transcurrido.
-- La deteccion de inactividad del jugador (`idle_score`) tambien usa tiempo
-  real, por lo que se activa muy rapido en modo headless.
+- Funcionalidades con delay (preguntas a los 30s, música a los 30s, imagegen
+  a los 180s) se activan según el tiempo real transcurrido.
+- La detección de inactividad del jugador (`idle_score`) también usa tiempo
+  real, por lo que se activa muy rápido en modo headless.
 
-Para tests de logica pura (colisiones, scoring, movimiento), esto no importa.
-Para tests que involucren timing (narracion, imagegen, emociones), usar
+Para tests de lógica pura (colisiones, scoring, movimiento), esto no importa.
+Para tests que involucren timing (narración, imagegen, emociones), usar
 `time.sleep()` entre batches.
 
 ### _FakeKeyState y pygame 2 (SDL2)
 
 En Pygame 2, las constantes de tecla como `pygame.K_UP` son valores grandes
-(~1073741906, scancodes SDL2), no indices de una lista de 512 elementos.
+(~1073741906, scancodes SDL2), no índices de una lista de 512 elementos.
 `pygame.key.get_pressed()` retorna un `ScancodeWrapper` que convierte
 internamente. El harness usa `_FakeKeyState`, un objeto cuyo `__getitem__`
 simplemente comprueba pertenencia a un `set`:
@@ -354,5 +354,5 @@ modificar el renderer.
 | Zona de juego   | 800 x 500   |
 | Paleta          | 15 x 80     |
 | Bola            | 12 x 12     |
-| Zona narracion  | 800 x 200   |
+| Zona narración  | 800 x 200   |
 | Banda marcador  | 800 x 44    |

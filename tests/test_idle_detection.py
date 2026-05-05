@@ -13,15 +13,19 @@ from pong.config.gameplay import (
     RALLY_IDLE_THRESHOLD,
 )
 from pong.emotional_state import EmotionalState
+from pong.game_state import MatchState
 from pong.question_system import DialogueEntry
 
 
 def _make_stub_game(**overrides: Any) -> Any:
     """Crea un objeto con los atributos minimos de Game para testear."""
+    match = MatchState()
+    if "rally_hits" in overrides:
+        match.rally_hits = overrides.pop("rally_hits")
     g = SimpleNamespace(
         _player_positions=[],
         _player_idle_score=0.0,
-        rally_hits=0,
+        match=match,
         emotional_target=EmotionalState(),
         emotion_active=False,
         questions=SimpleNamespace(dialogue_history=[]),

@@ -67,6 +67,8 @@ class NarratorProtocol(Protocol):
     @property
     def memory(self) -> Sequence[Any]: ...
 
+    def reload_llm(self) -> None: ...
+
 
 @runtime_checkable
 class NarrationBridgeProtocol(Protocol):
